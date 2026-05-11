@@ -5,9 +5,11 @@ import '../views/registo_view.dart';
 import '../views/recuperar_pw_view.dart';
 import '../views/catalogo_view.dart';
 import '../views/candidatura_view.dart';
-import '../views/historico_badges_view.dart';
+import '../views/meus_badges_view.dart';
+import '../views/conquistas_especiais_view.dart';
 import '../views/historico_candidaturas_view.dart';
 import '../views/timeline_view.dart';
+import '../views/objetivo_view.dart';
 import '../views/estatisticas_view.dart';
 import '../views/perfil_view.dart';
 import '../views/notificacoes_view.dart';
@@ -42,9 +44,13 @@ final rotas = GoRouter(
         path: '/candidatura',
         builder: (context, state) => const CandidaturaView()),
     GoRoute(
-        name: 'historico_badges',
-        path: '/historico_badges',
-        builder: (context, state) => const HistoricoBadgesView()),
+        name: 'meus_badges',
+        path: '/meus_badges',
+        builder: (context, state) => const MeusBadgesView()),
+    GoRoute(
+        name: 'conquistas_especiais',
+        path: '/conquistas_especiais',
+        builder: (context, state) => const ConquistasEspeciaisView()),
     GoRoute(
         name: 'historico_candidaturas',
         path: '/historico_candidaturas',
@@ -53,6 +59,10 @@ final rotas = GoRouter(
         name: 'timeline',
         path: '/timeline',
         builder: (context, state) => const TimelineView()),
+    GoRoute(
+        name: 'objetivo',
+        path: '/objetivo',
+        builder: (context, state) => const ObjetivoView()),
     GoRoute(
         name: 'estatisticas',
         path: '/estatisticas',
