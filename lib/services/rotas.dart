@@ -16,72 +16,75 @@ import '../views/notificacoes_view.dart';
 import '../views/badge_detalhe_view.dart';
 import '../views/pedido_status_view.dart';
 
-final rotas = GoRouter(
-  initialLocation: '/',
-  routes: [
-    GoRoute(
-        name: 'login',
-        path: '/',
-        builder: (context, state) => const LoginView()),
-    GoRoute(
-        name: 'dashboard',
-        path: '/dashboard',
-        builder: (context, state) => const DashboardView()),
-    GoRoute(
-        name: 'registo',
-        path: '/registo',
-        builder: (context, state) => const RegistoView()),
-    GoRoute(
-        name: 'recuperar',
-        path: '/recuperar',
-        builder: (context, state) => const RecuperarPwView()),
-    GoRoute(
-        name: 'catalogo',
-        path: '/catalogo',
-        builder: (context, state) => const CatalogoView()),
-    GoRoute(
-        name: 'candidatura',
-        path: '/candidatura',
-        builder: (context, state) => const CandidaturaView()),
-    GoRoute(
-        name: 'meus_badges',
-        path: '/meus_badges',
-        builder: (context, state) => const MeusBadgesView()),
-    GoRoute(
-        name: 'conquistas_especiais',
-        path: '/conquistas_especiais',
-        builder: (context, state) => const ConquistasEspeciaisView()),
-    GoRoute(
-        name: 'historico_candidaturas',
-        path: '/historico_candidaturas',
-        builder: (context, state) => const HistoricoCandidaturasView()),
-    GoRoute(
-        name: 'timeline',
-        path: '/timeline',
-        builder: (context, state) => const TimelineView()),
-    GoRoute(
-        name: 'objetivo',
-        path: '/objetivo',
-        builder: (context, state) => const ObjetivoView()),
-    GoRoute(
-        name: 'estatisticas',
-        path: '/estatisticas',
-        builder: (context, state) => const EstatisticasView()),
-    GoRoute(
-        name: 'perfil',
-        path: '/perfil',
-        builder: (context, state) => const PerfilView()),
-    GoRoute(
-        name: 'notificacoes',
-        path: '/notificacoes',
-        builder: (context, state) => const NotificacoesView()),
-    GoRoute(
-        name: 'badge_detalhe',
-        path: '/badge_detalhe',
-        builder: (context, state) => const BadgeDetalheView()),
-    GoRoute(
-        name: 'pedido_status',
-        path: '/pedido_status',
-        builder: (context, state) => const PedidoStatusView()),
-  ],
-);
+// Agora é uma função que recebe a rota inicial para a parte do login só ser feito na 1 vez (e verificar se o utilizador está logado)
+GoRouter criarRouter(String rotaInicial) {
+  return GoRouter(
+    initialLocation: rotaInicial,
+    routes: [
+      GoRoute(
+          name: 'login',
+          path: '/',
+          builder: (context, state) => const LoginView()),
+      GoRoute(
+          name: 'dashboard',
+          path: '/dashboard',
+          builder: (context, state) => const DashboardView()),
+      GoRoute(
+          name: 'registo',
+          path: '/registo',
+          builder: (context, state) => const RegistoView()),
+      GoRoute(
+          name: 'recuperar',
+          path: '/recuperar',
+          builder: (context, state) => const RecuperarPwView()),
+      GoRoute(
+          name: 'catalogo',
+          path: '/catalogo',
+          builder: (context, state) => const CatalogoView()),
+      GoRoute(
+          name: 'candidatura',
+          path: '/candidatura',
+          builder: (context, state) => const CandidaturaView()),
+      GoRoute(
+          name: 'meus_badges',
+          path: '/meus_badges',
+          builder: (context, state) => const MeusBadgesView()),
+      GoRoute(
+          name: 'conquistas_especiais',
+          path: '/conquistas_especiais',
+          builder: (context, state) => const ConquistasEspeciaisView()),
+      GoRoute(
+          name: 'historico_candidaturas',
+          path: '/historico_candidaturas',
+          builder: (context, state) => const HistoricoCandidaturasView()),
+      GoRoute(
+          name: 'timeline',
+          path: '/timeline',
+          builder: (context, state) => const TimelineView()),
+      GoRoute(
+          name: 'objetivo',
+          path: '/objetivo',
+          builder: (context, state) => const ObjetivoView()),
+      GoRoute(
+          name: 'estatisticas',
+          path: '/estatisticas',
+          builder: (context, state) => const EstatisticasView()),
+      GoRoute(
+          name: 'perfil',
+          path: '/perfil',
+          builder: (context, state) => const PerfilView()),
+      GoRoute(
+          name: 'notificacoes',
+          path: '/notificacoes',
+          builder: (context, state) => const NotificacoesView()),
+      GoRoute(
+          name: 'badge_detalhe',
+          path: '/badge_detalhe',
+          builder: (context, state) => const BadgeDetalheView()),
+      GoRoute(
+          name: 'pedido_status',
+          path: '/pedido_status',
+          builder: (context, state) => const PedidoStatusView()),
+    ],
+  );
+}
