@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_servico.dart';
 
 class LoginView extends StatefulWidget {
@@ -33,6 +34,10 @@ class _LoginViewState extends State<LoginView> {
     await Future.delayed(const Duration(seconds: 1));
 
     setState(() => _estaACarregar = false);
+
+    // Guarda na memória que o utilizador fez login com sucesso
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLogged', true);
 
     // Vai para o Dashboard usando as rotas
     context.go('/dashboard');
