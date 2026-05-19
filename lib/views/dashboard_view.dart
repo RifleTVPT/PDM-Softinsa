@@ -13,381 +13,339 @@ class DashboardView extends StatefulWidget {
 class _DashboardViewState extends State<DashboardView> {
   // DADOS DO GRÁFICO PRINCIPAL
   final int _badgesObtidos = 2;
-  final int _totalBadgesSL = 10;
+  final int _totalBadgesSL = 8; // Ajustado para 8 para dar exatos 25%
 
   // DADOS DAS APRENDIZAGENS ATIVAS
   final List<Map<String, dynamic>> _aprendizagensAtivas = [
     {
-      "titulo": "LowCode (outsystems) - nível A",
+      "titulo": "LowCode (Outsystems) - Nível A",
       "sl": "Hybrid Cloud",
-      "reqValidados": 2,
-      "reqTotais": 3,
+      "reqValidados": 4,
+      "reqTotais": 5,
     },
     {
-      "titulo": "DevOps Practices - nível B",
-      "sl": "Cloud & DevOps",
+      "titulo": "LowCode (Outsystems) - Nível B",
+      "sl": "Hybrid Cloud",
       "reqValidados": 1,
-      "reqTotais": 4,
-    }
+      "reqTotais": 5,
+    },
   ];
 
-  // DADOS DE PERFORMANCE E RANKING
+  // DADOS DE PERFORMANCE
   final int _pontosTotais = 8000;
-  final int _pontosObtidosEstaSemana = 20;
-  final int _posicaoRanking = 12;
-  final int _totalConsultores = 120;
+  final int _badgesTotaisCard = 50;
 
-  // DADOS DO GRÁFICO DE COMPARAÇÃO
+  // DADOS DO GRÁFICO DE COMPARAÇÃO (Mantidos para a funcionalidade inferior)
   final double _meusPontosMedia = 350;
   final double _mediaServiceLine = 420;
   final double _mediaEmpresa = 380;
 
-  // Arredondar a percentagem do gráfico principal (Badges)
   int _calcularPercentagemGlobal() {
     if (_totalBadgesSL == 0) return 0;
-    double calculo = (_badgesObtidos / _totalBadgesSL) * 100;
-    return calculo.ceil();
+    return ((_badgesObtidos / _totalBadgesSL) * 100).ceil();
   }
 
-  // Arredondar a percentagem das aprendizagens (Requisitos)
   int _calcularPercentagemAtiva(int reqValidados, int reqTotais) {
     if (reqTotais == 0) return 0;
-    double calculo = (reqValidados / reqTotais) * 100;
-    return calculo.ceil();
+    return ((reqValidados / reqTotais) * 100).ceil();
   }
 
   @override
   Widget build(BuildContext context) {
     int percentagemGlobal = _calcularPercentagemGlobal();
 
+    // O LayoutConsultor já traz a AppBar com o Drawer (3 traços) e ícones a funcionar.
     return LayoutConsultor(
       indexMenuInferior: 0,
-      // Stack para resolver o bug de "bater no topo" (overscroll background)
-      corpo: Stack(
-        children: [
-          // FUNDO DIVIDIDO PARA O OVERSCROLL: Metade azul, metade cinza
-          Column(
+      corpo: Container(
+        color: const Color(0xFFF5F7FA), // Fundo cinza da imagem
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 30.0),
+          child: Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.center, // Centraliza textos do topo
             children: [
-              Expanded(child: Container(color: const Color(0xFF34659D))),
-              Expanded(child: Container(color: const Color(0xFFE9EEF2))),
+              const Text(
+                "Olá, Consultor!",
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                "O meu progresso Geral",
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
+              const SizedBox(height: 30),
+
+              // Gráfico Circular Central (25%) idêntico à imagem
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 170,
+                    height: 170,
+                    child: CircularProgressIndicator(
+                      value: percentagemGlobal / 100,
+                      strokeWidth: 14,
+                      backgroundColor: Colors.grey[300],
+                      color: const Color(0xFF0980E9), // Azul vivo da barra
+                    ),
+                  ),
+                  Text(
+                    "$percentagemGlobal%",
+                    style: const TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+              const Text(
+                "dos Badges da sua\nService Line completos",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              const SizedBox(height: 35),
+
+              // 3 Cartões Pequenos (Pontos, Badges, Expirar)
+              Row(
+                children: [
+                  _buildSmallCard("Total de Pontos", _pontosTotais.toString()),
+                  const SizedBox(width: 8),
+                  _buildSmallCard(
+                    "Badges Obtidos",
+                    _badgesTotaisCard.toString(),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSmallAlertCard(
+                    "Próximo Expirar",
+                    "LowCode - Nível B\n25 dias",
+                  ),
+                ],
+              ),
+              const SizedBox(height: 35),
+
+              // Secção: Aprendizagens Ativas
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Aprendizagens ativas",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 15),
+              ..._aprendizagensAtivas.map((aprendizagem) {
+                return _construirCardAprendizagem(
+                  aprendizagem['titulo'],
+                  aprendizagem['sl'],
+                  aprendizagem['reqValidados'],
+                  aprendizagem['reqTotais'],
+                );
+              }),
+
+              const SizedBox(height: 30),
+
+              // Gráfico de Barras mantido para preservar a funcionalidade
+              _construirSeccaoGrafico(),
             ],
           ),
+        ),
+      ),
+    );
+  }
 
-          // CONTEÚDO SCROLLÁVEL
-          SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: Column(
+  // NOVO WIDGET: Cartões brancos de estatísticas
+  Widget _buildSmallCard(String title, String value) {
+    return Expanded(
+      child: Container(
+        height: 75,
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 9,
+                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 5),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // NOVO WIDGET: Cartão de Alerta (Próximo Expirar)
+  Widget _buildSmallAlertCard(String title, String subtitle) {
+    return Expanded(
+      child: Container(
+        height: 75,
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 9,
+                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 5),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1. ÁREA DE PROGRESSO SUPERIOR (Fundo inteiramente azul)
-                _construirHeaderProgresso(percentagemGlobal),
-
-                // 2. CORPO DA PÁGINA (Com cantos arredondados no topo cortando o azul)
-                Container(
-                  width: double.infinity,
-                  constraints: BoxConstraints(
-                    // Garante que o fundo cinza preenche sempre o resto do ecrã
-                    minHeight: MediaQuery.of(context).size.height * 0.6,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE9EEF2), // Cinza do tema
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(30),
-                      topRight: Radius.circular(30),
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.orange,
+                  size: 12,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 8,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.bold,
                     ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 30, 20, 30),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // 3. CARDS DE PERFORMANCE E RANKING (Tamanhos iguais usando IntrinsicHeight)
-                        IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Expanded(
-                                child: _construirCardInfo(
-                                  "Performance Global",
-                                  "Total de Pontos",
-                                  _pontosTotais.toString(),
-                                  "+$_pontosObtidosEstaSemana obtidos esta semana",
-                                  Icons.insights,
-                                ),
-                              ),
-                              const SizedBox(width: 15),
-                              Expanded(
-                                child: _construirCardInfo(
-                                  "Ranking Pessoal",
-                                  "Lugar atual",
-                                  "#$_posicaoRankingº lugar",
-                                  "de $_totalConsultores consultores da sua Service Line",
-                                  Icons.emoji_events_outlined,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 30),
-
-                        // 4. APRENDIZAGENS ATIVAS (Requisitos)
-                        _construirAprendizagensAtivasSecao(),
-
-                        const SizedBox(height: 30),
-
-                        // 5. GRÁFICO DE COMPARAÇÃO
-                        _construirSeccaoGrafico(),
-                      ],
-                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  // Widget para a secção azul superior
-  Widget _construirHeaderProgresso(int percentagem) {
-    return Container(
-      width: double.infinity,
-      // Sem border radius aqui. O recorte é feito pelo contentor cinzento que se sobrepõe
-      padding: const EdgeInsets.only(top: 25, bottom: 45, left: 20, right: 20),
-      color: const Color(0xFF34659D),
-      child: Column(
-        children: [
-          const Text(
-            "O Meu Percurso de Badges",
-            style: TextStyle(
-                color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 25),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              SizedBox(
-                width: 130,
-                height: 130,
-                child: CircularProgressIndicator(
-                  value: percentagem / 100,
-                  strokeWidth: 12,
-                  backgroundColor: Colors.white12,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              ),
-              Column(
-                children: [
-                  Text(
-                    "$percentagem%",
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold),
-                  ),
-                  const Text(
-                    "Conquistados",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            "Faltam ${(_totalBadgesSL - _badgesObtidos)} badges para completar a sua Service Line!",
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w400),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Widget para os cards com tamanhos equivalentes
-  Widget _construirCardInfo(
-      String titulo, String sub, String valor, String footer, IconData icone) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment:
-            MainAxisAlignment.spaceBetween, // Estica os elementos igualmente
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icone, color: const Color(0xFF34659D), size: 24),
-              const SizedBox(height: 10),
-              Text(titulo,
-                  style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(valor,
-                  style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A1A1A))),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(footer,
-              style: const TextStyle(
-                  fontSize: 10,
-                  color: Colors.blueGrey,
-                  fontWeight: FontWeight.w500)),
-        ],
-      ),
-    );
-  }
-
-  // Widget para as Aprendizagens Ativas
-  Widget _construirAprendizagensAtivasSecao() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Aprendizagens Ativas",
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                color: Color(0xFF1A1A1A))),
-        const SizedBox(height: 15),
-        ..._aprendizagensAtivas.map((aprendizagem) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12.0),
-            child: _construirCardAprendizagem(
-                aprendizagem['titulo'],
-                aprendizagem['sl'],
-                aprendizagem['reqValidados'],
-                aprendizagem['reqTotais']),
-          );
-        }).toList(),
-      ],
-    );
-  }
-
-  // Widget individual para cada Aprendizagem Ativa
+  // ATUALIZADO: Card das aprendizagens para espelhar a imagem
   Widget _construirCardAprendizagem(
-      String titulo, String sl, int reqValidados, int reqTotais) {
-    int percentagemAtiva = _calcularPercentagemAtiva(reqValidados, reqTotais);
+    String titulo,
+    String sl,
+    int validados,
+    int totais,
+  ) {
+    int percentagemAtiva = _calcularPercentagemAtiva(validados, totais);
 
     return InkWell(
-      onTap: () =>
-          context.push('/candidatura'), // Ir para as candidaturas ao clicar
-      borderRadius: BorderRadius.circular(15),
+      onTap: () => context.push('/candidatura'),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(15),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 3))
-          ],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
         ),
         child: Row(
           children: [
-            // Ícone Esquerdo
+            // Ícone com contorno circular da imagem
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF4F5F9),
-                borderRadius: BorderRadius.circular(12),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.grey.shade400),
               ),
-              child: const Icon(Icons.school_outlined,
-                  color: Color(0xFF34659D), size: 28),
+              child: const Icon(
+                Icons.storefront_outlined,
+                color: Colors.grey,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 15),
-
-            // Informação Central
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    titulo,
+                    sl,
                     style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Color(0xFF1A1A1A)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Colors.black87,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    "Service Line: $sl",
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                        fontWeight: FontWeight.w500),
+                    titulo,
+                    style: const TextStyle(color: Colors.grey, fontSize: 11),
                   ),
-                  const SizedBox(height: 10),
-
-                  // Texto de requisitos
-                  Text(
-                    "$reqValidados de $reqTotais requisitos validados",
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: Colors.blueGrey,
-                        fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
-
-                  // Barra de progresso linear
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: LinearProgressIndicator(
-                            value:
-                                reqTotais == 0 ? 0 : reqValidados / reqTotais,
-                            backgroundColor: const Color(0xFFE9EEF2),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                                Color(0xFF0980E9)),
-                            minHeight: 6,
-                          ),
+                        child: LinearProgressIndicator(
+                          value: totais == 0 ? 0 : validados / totais,
+                          backgroundColor: Colors.grey[200],
+                          color: const Color(0xFF0980E9),
+                          minHeight: 4,
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Text("$percentagemAtiva%",
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF0980E9))),
+                      Text(
+                        "$percentagemAtiva%",
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0980E9),
+                        ),
+                      ),
                     ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
           ],
         ),
       ),
     );
   }
 
-  // Widget para a área do gráfico de barras
+  // MANTIDO: Gráfico de comparação para não quebrar o código anterior
   Widget _construirSeccaoGrafico() {
-    double valorMaximo =
-        [_meusPontosMedia, _mediaServiceLine, _mediaEmpresa].reduce(max);
+    double valorMaximo = [
+      _meusPontosMedia,
+      _mediaServiceLine,
+      _mediaEmpresa,
+    ].reduce(max);
 
     return Container(
       width: double.infinity,
@@ -395,35 +353,42 @@ class _DashboardViewState extends State<DashboardView> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 3))
-        ],
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Comparação de Média",
-              style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Color(0xFF1A1A1A))),
-          const SizedBox(height: 4),
-          const Text("O Meu Ritmo vs Médias (Pontos)",
-              style: TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 35),
+          const Text(
+            "Comparação de Média",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const Text(
+            "O Meu Ritmo vs Médias (Pontos)",
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+          const SizedBox(height: 25),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               _barraGrafico(
-                  "Eu", _meusPontosMedia, valorMaximo, const Color(0xFF0980E9)),
-              _barraGrafico("Média SL", _mediaServiceLine, valorMaximo,
-                  const Color(0xFF34659D)),
+                "Eu",
+                _meusPontosMedia,
+                valorMaximo,
+                const Color(0xFF0980E9),
+              ),
               _barraGrafico(
-                  "Empresa", _mediaEmpresa, valorMaximo, Colors.grey.shade300),
+                "Média SL",
+                _mediaServiceLine,
+                valorMaximo,
+                const Color(0xFF1A468D),
+              ),
+              _barraGrafico(
+                "Empresa",
+                _mediaEmpresa,
+                valorMaximo,
+                Colors.grey.shade300,
+              ),
             ],
           ),
         ],
@@ -431,35 +396,36 @@ class _DashboardViewState extends State<DashboardView> {
     );
   }
 
-  // Construtor de barras individuais para o gráfico
   Widget _barraGrafico(String label, double valor, double maximo, Color cor) {
-    double alturaMaximaGrafico = 150.0;
-    double alturaCalculada = (valor / maximo) * alturaMaximaGrafico;
+    double alturaCalculada = (valor / maximo) * 100.0;
 
     return Column(
       children: [
-        Text("${valor.toInt()} pts",
-            style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1A1A1A))),
+        Text(
+          "${valor.toInt()} pts",
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
         Container(
-          width: 40,
+          width: 35,
           height: alturaCalculada,
           decoration: BoxDecoration(
             color: cor,
             borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(6),
-              topRight: Radius.circular(6),
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(4),
             ),
           ),
         ),
         const SizedBox(height: 10),
-        Text(label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            color: Colors.grey,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ],
     );
   }
