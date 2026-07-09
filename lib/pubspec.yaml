@@ -1,0 +1,57 @@
+name: softinsa_badges_app
+description: "Aplicação de Gestão de Badges - Softinsa"
+
+# versão da aplicação (1.0.0) e o número de build (+1)
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Dependências para Base de Dados Local
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+  # Dependência para API
+  http: ^1.1.0
+
+  # Ícones adicionais
+  cupertino_icons: ^1.0.5
+
+  # Dependência para verificar conectividade
+  connectivity_plus: ^5.0.2
+
+  # Dependência para Routes
+  go_router: ^12.0.0  
+  firebase_core: ^4.9.0
+  firebase_messaging: ^16.2.2
+  flutter_local_notifications: ^21.0.0
+  shared_preferences: ^2.5.5
+  provider: ^6.1.5+1
+  file_picker: ^11.0.2
+  crypto: ^3.0.7
+  url_launcher: ^6.3.2
+  fl_chart: ^1.2.0
+  pdf: ^3.12.0
+  excel: ^4.0.6
+  path_provider: ^2.1.6
+  open_file: ^4.0.0
+  intl: ^0.20.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  # Ferramenta para garantir que o código segue as boas práticas de Dart
+  flutter_lints: ^2.0.0
+
+flutter:
+  # Ativa o uso de Material Design 3
+  uses-material-design: true
+
+  # Configuração de Assets (Imagens e Logos)
+  assets:
+    - assets/images/
