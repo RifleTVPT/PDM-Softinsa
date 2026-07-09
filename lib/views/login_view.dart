@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import '../services/api_servico.dart';
+import '../services/sincronizador.dart';
 
 class LoginView extends StatefulWidget {
   const LoginView({super.key});
@@ -27,20 +28,38 @@ class _LoginViewState extends State<LoginView> {
   }
 
   void _fazerLogin() async {
-    // Começa a carregar
+    if (_caixaEmail.text.trim().isEmpty || _caixaSenha.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Preencha o email e a password.')),
+      );
+      return;
+    }
+
     setState(() => _estaACarregar = true);
-
-    // Espera um pouco para simular a internet
-    await Future.delayed(const Duration(seconds: 1));
-
+    final resultado = await ApiServico().login(
+      _caixaEmail.text.trim(),
+      _caixaSenha.text,
+    );
+    if (!mounted) return;
     setState(() => _estaACarregar = false);
 
-    // Guarda na memória que o utilizador fez login com sucesso
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isLogged', true);
+    if (!resultado.sucesso) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(resultado.mensagem)),
+      );
+      return;
+    }
 
-    // Vai para o Dashboard usando as rotas
-    context.go('/dashboard');
+    if (resultado.primeiroAcesso) {
+      if (!mounted) return;
+      context.go('/primeiro_acesso');
+      return;
+    }
+
+    await Sincronizador().sincronizarDadosIniciais();
+    final tokenFcm = await FirebaseMessaging.instance.getToken();
+    if (tokenFcm != null) await ApiServico().registarFcmToken(tokenFcm);
+    if (mounted) context.go('/dashboard');
   }
 
   @override

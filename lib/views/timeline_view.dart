@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../components/layout_consultor.dart';
+import '../database/bd_local_ajudante.dart';
 import 'package:go_router/go_router.dart';
 
 class TimelineView extends StatefulWidget {
@@ -10,27 +11,24 @@ class TimelineView extends StatefulWidget {
 }
 
 class _TimelineViewState extends State<TimelineView> {
-  // Mock de objetivos (Baseado no teu .jsx)
-  final List<Map<String, dynamic>> _objetivosMock = [
-    {
-      "id": 1,
-      "titulo": "Chegar ao Nível B em Cloud",
-      "data": "15/12/2025",
-      "tipo": "Progressão de Nível (A-E)",
-      "status": "Em Progresso",
-      "origem": "Eu",
-      "cor": Colors.blue,
-    },
-    {
-      "id": 2,
-      "titulo": "Certificação Azure AZ-900",
-      "data": "20/06/2025",
-      "tipo": "Certificação Premium",
-      "status": "Concluído",
-      "origem": "Service Line Leader",
-      "cor": Colors.green,
-    },
-  ];
+  List<Map<String, dynamic>> _objetivos = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarTimeline();
+  }
+
+  Future<void> _carregarTimeline() async {
+    final dados = await BDLocalAjudante().obterTimeline();
+    
+    if (!mounted) return;
+    setState(() {
+      _objetivos = dados;
+      _isLoading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,20 +85,29 @@ class _TimelineViewState extends State<TimelineView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "${_objetivosMock.length} Objetivos na Linha Temporal",
+                        "${_objetivos.length} Objetivos na Linha Temporal",
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, color: Colors.grey),
                       ),
                       const SizedBox(height: 15),
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _objetivosMock.length,
-                        itemBuilder: (context, index) {
-                          final obj = _objetivosMock[index];
-                          return _construirCardObjetivo(obj);
-                        },
-                      ),
+                      _isLoading 
+                        ? const Center(child: CircularProgressIndicator())
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _objetivos.length,
+                            itemBuilder: (context, index) {
+                              final obj = _objetivos[index];
+                              final mapObj = {
+                                "titulo": obj['TITULO'],
+                                "data": obj['DATA_OBJETIVO'],
+                                "tipo": "Objetivo",
+                                "status": obj['STATUS'],
+                                "origem": obj['ORIGEM']
+                              };
+                              return _construirCardObjetivo(mapObj);
+                            },
+                          ),
                     ],
                   ),
                 ),

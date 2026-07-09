@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
+import '../database/bd_local_ajudante.dart';
 
 class CatalogoView extends StatefulWidget {
   const CatalogoView({super.key});
@@ -10,80 +11,121 @@ class CatalogoView extends StatefulWidget {
 }
 
 class _CatalogoViewState extends State<CatalogoView> {
+  bool _isLoading = true;
+
   // Controladores e Filtros
   final TextEditingController _pesquisaController = TextEditingController();
   String _servicoEscolhido = "Todas as Service Lines";
+  List<String> _todasServiceLines = ["Todas as Service Lines"];
+  String _areaEscolhida = "Todas as Áreas";
+  List<String> _todasAreas = ["Todas as Áreas"];
   final List<String> _niveisSelecionados = [];
-  final List<String> _todosNiveis = ['A', 'B', 'C', 'D', 'E'];
+  List<String> _todosNiveis = [];
 
-  // Dados Mockados - RECOMENDADOS PARA O CONSULTOR (Baseado no histórico)
-  final List<Map<String, dynamic>> _badgesRecomendados = [
-    {
-      "id": 101,
-      "titulo": "LowCode (Outsystems) - Nível B",
-      "sl": "Hybrid Cloud",
-      "pontos": 300,
-      "icone": Icons.auto_awesome
-    },
-    {
-      "id": 102,
-      "titulo": "DevOps Practices - Nível C",
-      "sl": "DevOps",
-      "pontos": 500,
-      "icone": Icons.cloud_sync
-    },
-    {
-      "id": 103,
-      "titulo": "Data Science - Nível A",
-      "sl": "Data & AI",
-      "pontos": 150,
-      "icone": Icons.analytics
-    },
-  ];
+  // Dados Dinâmicos
+  List<Map<String, dynamic>> _badgesRecomendados = [];
+  List<Map<String, dynamic>> _todosBadges = [];
 
-  // Dados Mockados - TODOS OS BADGES (Simula a resposta da BD/API)
-  final List<Map<String, dynamic>> _todosBadges = [
-    {
-      "id": 1,
-      "titulo": "LowCode (Outsystems) - Nível A",
-      "sl": "Hybrid Cloud",
-      "nivel": "A",
-      "pontos": 150,
-      "icone": Icons.auto_awesome
-    },
-    {
-      "id": 2,
-      "titulo": "DevOps Practices - Nível B",
-      "sl": "DevOps",
-      "nivel": "B",
-      "pontos": 300,
-      "icone": Icons.cloud_sync
-    },
-    {
-      "id": 3,
-      "titulo": "Talent Sourcing - Nível A",
-      "sl": "Talent Management",
-      "nivel": "A",
-      "pontos": 100,
-      "icone": Icons.people_alt
-    },
-    {
-      "id": 4,
-      "titulo": "Data Science Foundations - Nível C",
-      "sl": "Data & AI",
-      "nivel": "C",
-      "pontos": 500,
-      "icone": Icons.analytics
-    },
-    {
-      "id": 5,
-      "titulo": "Cybersecurity Basics - Nível A",
-      "sl": "Security",
-      "nivel": "A",
-      "pontos": 150,
-      "icone": Icons.security
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _carregarCatalogo();
+  }
+
+  Future<void> _carregarCatalogo() async {
+    try {
+      final dbHelper = BDLocalAjudante();
+      final users = await dbHelper.listar('UTILIZADOR');
+      int userId = 1; // Fallback
+      if (users.isNotEmpty) {
+        userId = users.first['ID_UTILIZADOR'] as int;
+      }
+
+      Map<String, dynamic> dados = await dbHelper.obterCatalogo(userId);
+
+      setState(() {
+        _todosBadges = List<Map<String, dynamic>>.from(dados['todos']);
+        _badgesRecomendados = List<Map<String, dynamic>>.from(dados['recomendados']);
+        
+        // Mapear icones dinamicamente para não alterar o design da UI
+        for (var b in _todosBadges) {
+          b['icone'] = _obterIconePorArea(b['sl']);
+        }
+        for (var b in _badgesRecomendados) {
+          b['icone'] = _obterIconePorArea(b['sl']);
+        }
+        // Extrair SLs, Areas e Niveis disponiveis
+        _todasServiceLines = ["Todas as Service Lines", ..._todosBadges.map((e) => e['sl'].toString()).toSet().toList()..sort()];
+        _atualizarAreasPorSL("Todas as Service Lines");
+        
+        _isLoading = false;
+      });
+    } catch (e) {
+      print("Erro ao carregar catálogo: \$e");
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _atualizarAreasPorSL(String sl) {
+    _servicoEscolhido = sl;
+    _areaEscolhida = "Todas as Áreas";
+    if (sl == "Todas as Service Lines") {
+      _todasAreas = ["Todas as Áreas", ..._todosBadges.map((e) => e['area'].toString()).toSet()];
+    } else {
+      _todasAreas = ["Todas as Áreas", ..._todosBadges.where((e) => e['sl'] == sl).map((e) => e['area'].toString()).toSet()];
+    }
+    _atualizarNiveis();
+  }
+
+  void _atualizarNiveis() {
+    var badges = _todosBadges;
+    if (_servicoEscolhido != "Todas as Service Lines") {
+      badges = badges.where((e) => e['sl'] == _servicoEscolhido).toList();
+    }
+    if (_areaEscolhida != "Todas as Áreas") {
+      badges = badges.where((e) => e['area'] == _areaEscolhida).toList();
+    }
+    _todosNiveis = badges.map((e) => e['nivel'].toString()).toSet().toList();
+    _todosNiveis.sort();
+    _niveisSelecionados.removeWhere((n) => !_todosNiveis.contains(n));
+  }
+
+  IconData _obterIconePorArea(String area) {
+    String a = area.toLowerCase();
+    if (a.contains('devops')) return Icons.cloud_sync;
+    if (a.contains('data') || a.contains('ai')) return Icons.analytics;
+    if (a.contains('security')) return Icons.security;
+    if (a.contains('talent')) return Icons.people_alt;
+    return Icons.auto_awesome; // Default (Hybrid Cloud, etc)
+  }
+
+  Widget _construirImagemBadge(String? urlImagem, IconData iconeFallback, double raio) {
+    if (urlImagem != null && urlImagem.isNotEmpty) {
+      // Assuming network URL for now, could be local asset if no network but this mimics Web
+      if (urlImagem.startsWith('http')) {
+        return CircleAvatar(
+          backgroundColor: const Color(0xFFF4F5F9),
+          radius: raio,
+          backgroundImage: NetworkImage(urlImagem),
+          onBackgroundImageError: (_, __) {},
+          child: null,
+        );
+      } else {
+        return CircleAvatar(
+          backgroundColor: const Color(0xFFF4F5F9),
+          radius: raio,
+          backgroundImage: AssetImage('assets/images/$urlImagem'),
+          onBackgroundImageError: (_, __) {},
+        );
+      }
+    }
+    
+    return CircleAvatar(
+      backgroundColor: const Color(0xFFF4F5F9),
+      radius: raio,
+      child: Icon(iconeFallback, color: const Color(0xFF34659D), size: raio),
+    );
+  }
 
   @override
   void dispose() {
@@ -111,15 +153,25 @@ class _CatalogoViewState extends State<CatalogoView> {
       bool slMatch = _servicoEscolhido == "Todas as Service Lines" ||
           badge["sl"] == _servicoEscolhido;
 
+      bool areaMatch = _areaEscolhida == "Todas as Áreas" ||
+          badge["area"] == _areaEscolhida;
+
       bool nivelMatch = _niveisSelecionados.isEmpty ||
           _niveisSelecionados.contains(badge["nivel"]);
 
-      return textoMatch && slMatch && nivelMatch;
+      return textoMatch && slMatch && areaMatch && nivelMatch;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return LayoutConsultor(
+        indexMenuInferior: 1,
+        corpo: const Center(child: CircularProgressIndicator(color: Color(0xFF34659D))),
+      );
+    }
+
     List<Map<String, dynamic>> badgesVisiveis = _obterBadgesFiltrados();
 
     return LayoutConsultor(
@@ -186,7 +238,7 @@ class _CatalogoViewState extends State<CatalogoView> {
 
                       // LISTA HORIZONTAL DE RECOMENDADOS
                       SizedBox(
-                        height: 140, // Altura dos cards recomendados
+                        height: 180, // Aumentado para evitar overflow
                         child: ListView.builder(
                           physics: const BouncingScrollPhysics(),
                           scrollDirection: Axis.horizontal,
@@ -195,7 +247,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                           itemBuilder: (context, index) {
                             var rec = _badgesRecomendados[index];
                             return GestureDetector(
-                              onTap: () => context.push('/badge_detalhe'),
+                              onTap: () => context.push('/badge_detalhe', extra: {'idBadge': rec['id'], 'from': 'catalogo'}),
                               child: Container(
                                 width: 220, // Largura de cada card
                                 margin: const EdgeInsets.only(right: 15),
@@ -216,14 +268,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                                   children: [
                                     Row(
                                       children: [
-                                        CircleAvatar(
-                                          backgroundColor:
-                                              const Color(0xFFF4F5F9),
-                                          radius: 20,
-                                          child: Icon(rec['icone'],
-                                              color: const Color(0xFF34659D),
-                                              size: 20),
-                                        ),
+                                        _construirImagemBadge(rec['urlImagem'], rec['icone'], 20),
                                         const Spacer(),
                                         const Icon(
                                             Icons.arrow_forward_ios_rounded,
@@ -231,7 +276,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                                             color: Colors.grey),
                                       ],
                                     ),
-                                    const SizedBox(height: 15),
+                                    const SizedBox(height: 10),
                                     Text(
                                       rec['titulo'],
                                       maxLines: 2,
@@ -240,6 +285,26 @@ class _CatalogoViewState extends State<CatalogoView> {
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13,
                                           color: Color(0xFF1A1A1A)),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      rec['sl'],
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF34659D), // Azul Softinsa
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "${rec['area']} - ${rec['nivel']}",
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.blueGrey,
+                                          fontWeight: FontWeight.bold),
                                     ),
                                     const Spacer(),
                                     Text(
@@ -319,19 +384,43 @@ class _CatalogoViewState extends State<CatalogoView> {
                             isExpanded: true,
                             icon: const Icon(Icons.keyboard_arrow_down,
                                 color: Color(0xFF34659D)),
-                            items: [
-                              "Todas as Service Lines",
-                              "Hybrid Cloud",
-                              "DevOps",
-                              "Data & AI",
-                              "Security",
-                              "Talent Management"
-                            ]
+                            items: _todasServiceLines
                                 .map((s) =>
                                     DropdownMenuItem(value: s, child: Text(s)))
                                 .toList(),
-                            onChanged: (v) =>
-                                setState(() => _servicoEscolhido = v!),
+                            onChanged: (v) {
+                              setState(() {
+                                _atualizarAreasPorSL(v!);
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+
+                      // Dropdown de Área
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.black12)),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _areaEscolhida,
+                            isExpanded: true,
+                            icon: const Icon(Icons.keyboard_arrow_down,
+                                color: Color(0xFF34659D)),
+                            items: _todasAreas
+                                .map((a) =>
+                                    DropdownMenuItem(value: a, child: Text(a)))
+                                .toList(),
+                            onChanged: (v) {
+                                setState(() {
+                                  _areaEscolhida = v!;
+                                  _atualizarNiveis();
+                                });
+                            },
                           ),
                         ),
                       ),
@@ -344,13 +433,15 @@ class _CatalogoViewState extends State<CatalogoView> {
                               fontSize: 13,
                               color: Colors.black54)),
                       const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: _todosNiveis.map((n) {
-                          bool sel = _niveisSelecionados.contains(n);
-                          return GestureDetector(
-                            onTap: () => _alternarNivel(n),
-                            child: Container(
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _todosNiveis.map((n) {
+                            bool sel = _niveisSelecionados.contains(n);
+                            return GestureDetector(
+                              onTap: () => _alternarNivel(n),
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 15),
                               width: 45,
                               height: 45,
                               alignment: Alignment.center,
@@ -382,6 +473,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                             ),
                           );
                         }).toList(),
+                      ),
                       ),
 
                       const SizedBox(height: 35),
@@ -426,55 +518,166 @@ class _CatalogoViewState extends State<CatalogoView> {
                           itemCount: badgesVisiveis.length,
                           itemBuilder: (context, index) {
                             var badge = badgesVisiveis[index];
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(15),
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: Colors.black.withOpacity(0.03),
-                                      blurRadius: 10)
-                                ],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 15, vertical: 8),
-                                leading: CircleAvatar(
-                                  backgroundColor: const Color(0xFFE9EEF2),
-                                  radius: 25,
-                                  child: Icon(badge['icone'],
-                                      color: const Color(0xFF34659D), size: 24),
+                            return GestureDetector(
+                              onTap: () {
+                                context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 20),
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(15),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 15,
+                                        offset: const Offset(0, 5))
+                                  ],
                                 ),
-                                title: Text(
-                                  badge['titulo'],
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14),
+                                child: Column(
+                                  children: [
+                                    // Imagem com anel azul
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: const Color(0xFF4C51F7), width: 2), // Azul estilo Web
+                                      ),
+                                      child: _construirImagemBadge(badge['urlImagem'], badge['icone'], 35),
+                                    ),
+                                    const SizedBox(height: 15),
+                                    
+                                    // Título
+                                    Text(
+                                      badge['titulo'],
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                          color: Color(0xFF1A1A1A)),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    
+                                    // Service Line
+                                    Text(
+                                      "Service Line ${badge['sl']}",
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF4C51F7)),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    
+                                    // Área e Nível
+                                    Text(
+                                      "Área de ${badge['area']} - Nível ${badge['nivel']}",
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF555555)),
+                                    ),
+                                    const SizedBox(height: 15),
+                                    
+                                    // Caixas de Requisitos e Pontos
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFF8F9FA),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              const Text("Requisitos", style: TextStyle(fontSize: 10, color: Colors.black54)),
+                                              const SizedBox(height: 2),
+                                              Text("${badge['numeroRequisitos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black)),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 15),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFEEF0FF),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              const Text("Pontos", style: TextStyle(fontSize: 10, color: Color(0xFF4C51F7), fontWeight: FontWeight.bold)),
+                                              const SizedBox(height: 2),
+                                              Text("${badge['pontos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF4C51F7))),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 20),
+                                    
+                                    // Botões
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 45,
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          if (badge['obtido'] == true) {
+                                            showDialog(
+                                              context: context,
+                                              builder: (BuildContext context) {
+                                                return AlertDialog(
+                                                  title: const Text("Já obteve este Badge"),
+                                                  content: const Text("Este badge já faz parte do seu perfil."),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () {
+                                                        Navigator.of(context).pop(); // Close dialog
+                                                      },
+                                                      child: const Text("Voltar", style: TextStyle(color: Colors.grey)),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () {
+                                                        Navigator.of(context).pop(); // Close dialog
+                                                        context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                                                      },
+                                                      child: const Text("Ver Registo de Obtenção", style: TextStyle(color: Color(0xFF0980E9), fontWeight: FontWeight.bold)),
+                                                    ),
+                                                  ],
+                                                );
+                                              },
+                                            );
+                                          } else {
+                                            context.push('/candidatura', extra: {'idBadgeSelecionado': badge['id']});
+                                          }
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF4C51F7),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                                          elevation: 0,
+                                        ),
+                                        child: const Text("+ Candidatar-me", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      height: 45,
+                                      child: OutlinedButton(
+                                        onPressed: () {
+                                          context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                                        },
+                                        style: OutlinedButton.styleFrom(
+                                          side: const BorderSide(color: Colors.black45),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                                        ),
+                                        child: const Text("Ver Detalhes", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                subtitle: Padding(
-                                  padding: const EdgeInsets.only(top: 4.0),
-                                  child: Text(
-                                    "Service Line: ${badge['sl']}\n${badge['pontos']} Pontos",
-                                    style: const TextStyle(
-                                        fontSize: 12, color: Colors.black54),
-                                  ),
-                                ),
-                                trailing: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.withOpacity(0.05),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.arrow_forward_ios_rounded,
-                                    color: Color(0xFF34659D),
-                                    size: 16,
-                                  ),
-                                ),
-                                onTap: () {
-                                  context.push('/badge_detalhe');
-                                },
                               ),
                             );
                           },

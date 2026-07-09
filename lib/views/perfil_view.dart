@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
+import '../database/bd_local_ajudante.dart';
+
+import '../services/api_servico.dart';
 
 // Enum para gerir qual o ecrã visível dentro do Perfil
-enum ModoPerfil { menuPrincipal, editarPerfil, configuracoesApp }
+enum ModoPerfil { menuPrincipal, editarPerfil, centroAjuda }
 
 class PerfilView extends StatefulWidget {
   const PerfilView({super.key});
@@ -17,21 +20,60 @@ class _PerfilViewState extends State<PerfilView> {
   // Estado inicial: Menu do Perfil
   ModoPerfil _modoAtual = ModoPerfil.menuPrincipal;
 
+  // Dados carregados da BD
+  bool _isLoading = true;
+  Map<String, dynamic>? _perfilData;
+
   // Controladores para o Editar Perfil
-  final _nomeCtrl = TextEditingController(text: "João Silva");
-  final _emailCtrl = TextEditingController(text: "joao.silva@softinsa.pt");
-  String _slEscolhida = "Hybrid Cloud";
-  String _areaEscolhida = "LowCode (Outsystems)";
+  final _nomeCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  String _slEscolhida = "";
+  String _areaEscolhida = "";
 
   // Controladores para as Configurações da App
-  String _idiomaEscolhido = "Português";
-  bool _notifAprovacoes = true;
-  bool _notifExpiracao = true;
-  bool _partilhaLinkedIn = true;
+  String _avatarUrl = "";
+  int _idUtilizador = -1;
 
   // Controladores do Modal de Password
+  final _pwAtualCtrl = TextEditingController();
   final _novaPwCtrl = TextEditingController();
   final _confirmaPwCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarPerfil();
+  }
+
+  Future<void> _carregarPerfil() async {
+    final prefs = await SharedPreferences.getInstance();
+    _idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+    
+    final dados = await BDLocalAjudante().obterPerfil(_idUtilizador);
+    
+    if (!mounted) return;
+    setState(() {
+      _perfilData = dados;
+      _nomeCtrl.text = prefs.getString('nomeCompleto') ?? dados['nome'] ?? '';
+      _emailCtrl.text = prefs.getString('email') ?? dados['email'] ?? '';
+      _slEscolhida = dados['serviceLine'] ?? 'N/A';
+      _areaEscolhida = dados['area'] ?? 'Geral';
+      _avatarUrl = prefs.getString('avatarUrl') ?? '';
+      _isLoading = false;
+    });
+  }
+
+  String _obterIniciais(String nome) {
+    if (nome.isEmpty || nome == "A carregar...") return "?";
+    List<String> partes = nome.trim().split(' ');
+    if (partes.length == 1) return partes[0][0].toUpperCase();
+    return "${partes.first[0]}${partes.last[0]}".toUpperCase();
+  }
+
+  bool _validarPassword(String password) {
+    final regex = RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$');
+    return regex.hasMatch(password);
+  }
 
   @override
   void dispose() {
@@ -45,13 +87,33 @@ class _PerfilViewState extends State<PerfilView> {
   // ==========================================
   // FUNÇÕES DE AÇÃO
   // ==========================================
-  void _guardarAlteracoes() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text("Alterações guardadas com sucesso!"),
-          backgroundColor: Colors.green),
-    );
-    setState(() => _modoAtual = ModoPerfil.menuPrincipal);
+  void _guardarAlteracoes() async {
+    if (_nomeCtrl.text.isEmpty || _emailCtrl.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Preencha todos os campos!")));
+      return;
+    }
+
+    final res = await ApiServico().atualizarPerfil(_idUtilizador, _nomeCtrl.text, _emailCtrl.text);
+    
+    if (res['success'] == true) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('nomeCompleto', _nomeCtrl.text);
+      await prefs.setString('email', _emailCtrl.text);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text("Alterações guardadas com sucesso!"),
+            backgroundColor: Colors.green),
+      );
+      setState(() => _modoAtual = ModoPerfil.menuPrincipal);
+      _carregarPerfil(); // Reload para atualizar header
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message'] ?? "Erro ao guardar.")),
+      );
+    }
   }
 
   void _abrirModalPassword() {
@@ -65,6 +127,13 @@ class _PerfilViewState extends State<PerfilView> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            TextField(
+              controller: _pwAtualCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                  labelText: "Password Atual", border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 15),
             TextField(
               controller: _novaPwCtrl,
               obscureText: true,
@@ -80,7 +149,7 @@ class _PerfilViewState extends State<PerfilView> {
                   border: OutlineInputBorder()),
             ),
             const SizedBox(height: 10),
-            const Text("Deve conter mín. 8 caracteres, 1 maiúscula e 1 número.",
+            const Text("Mín. 8 caracteres, 1 maiúscula, 1 minúscula, 1 número e 1 especial (@\$!%*?&).",
                 style: TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
@@ -90,11 +159,30 @@ class _PerfilViewState extends State<PerfilView> {
             child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text("Password atualizada!"),
-                  backgroundColor: Colors.green));
+            onPressed: () async {
+              if (_novaPwCtrl.text != _confirmaPwCtrl.text) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("As passwords não coincidem.")));
+                return;
+              }
+              if (!_validarPassword(_novaPwCtrl.text)) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Formato de password inválido.")));
+                return;
+              }
+              
+              Navigator.pop(context); // Fechar Modal
+              final res = await ApiServico().mudarPassword(_idUtilizador, _pwAtualCtrl.text, _novaPwCtrl.text);
+              if (res['success'] == true) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Password atualizada com sucesso!"),
+                    backgroundColor: Colors.green));
+                _pwAtualCtrl.clear();
+                _novaPwCtrl.clear();
+                _confirmaPwCtrl.clear();
+              } else {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['message'] ?? "Erro ao atualizar.")));
+              }
             },
             style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0980E9)),
@@ -128,35 +216,54 @@ class _PerfilViewState extends State<PerfilView> {
                 // 1. MODO MENU: Cabeçalho Grande
                 ? Column(
                     children: [
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 45,
                         backgroundColor: Colors.white,
-                        child: Icon(Icons.person,
-                            size: 50, color: Color(0xFF34659D)),
+                        backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                        child: _avatarUrl.isEmpty 
+                            ? Text(_obterIniciais(_nomeCtrl.text), style: const TextStyle(color: Color(0xFF34659D), fontSize: 40, fontWeight: FontWeight.bold))
+                            : null,
                       ),
                       const SizedBox(height: 15),
-                      const Text("João Silva",
-                          style: TextStyle(
+                      Text(_nomeCtrl.text,
+                          style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                               color: Colors.white)),
                       const SizedBox(height: 5),
-                      const Text("joao.silva@softinsa.pt",
-                          style:
-                              TextStyle(color: Colors.white70, fontSize: 14)),
-                      const SizedBox(height: 5),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(15)),
-                        child: const Text("Perfil: Consultor",
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12)),
-                      ),
+                      Text(_emailCtrl.text,
+                          style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: Colors.white24,
+                                borderRadius: BorderRadius.circular(15)),
+                            child: Text(_perfilData?['serviceLine'] ?? 'SLL',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4),
+                            decoration: BoxDecoration(
+                                color: Colors.orangeAccent.withOpacity(0.8),
+                                borderRadius: BorderRadius.circular(15)),
+                            child: Text(_perfilData?['area'] ?? 'Área',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12)),
+                          ),
+                        ],
+                      )
                     ],
                   )
                 // 2. MODO FORMULÁRIO: Cabeçalho Compacto (Deixa muito mais ecrã para as opções)
@@ -168,17 +275,19 @@ class _PerfilViewState extends State<PerfilView> {
                         onPressed: () => setState(
                             () => _modoAtual = ModoPerfil.menuPrincipal),
                       ),
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 20,
                         backgroundColor: Colors.white,
-                        child: Icon(Icons.person,
-                            size: 24, color: Color(0xFF34659D)),
+                        backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
+                        child: _avatarUrl.isEmpty 
+                            ? Text(_obterIniciais(_nomeCtrl.text), style: const TextStyle(color: Color(0xFF34659D), fontSize: 16, fontWeight: FontWeight.bold))
+                            : null,
                       ),
                       const SizedBox(width: 15),
                       Text(
                         _modoAtual == ModoPerfil.editarPerfil
                             ? "Editar Perfil"
-                            : "Configurações da App",
+                            : "Centro de Ajuda",
                         style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -207,8 +316,8 @@ class _PerfilViewState extends State<PerfilView> {
         return _construirMenuPrincipal();
       case ModoPerfil.editarPerfil:
         return _construirEditarPerfil();
-      case ModoPerfil.configuracoesApp:
-        return _construirConfiguracoes();
+      case ModoPerfil.centroAjuda:
+        return _construirCentroAjuda();
     }
   }
 
@@ -224,19 +333,18 @@ class _PerfilViewState extends State<PerfilView> {
             "Atualize os seus dados e Service Line",
             () => setState(() => _modoAtual = ModoPerfil.editarPerfil)),
         _itemBotaoMenu(
-            Icons.settings_outlined,
-            "Configurações da App",
-            "Notificações, idioma e RGPD",
-            () => setState(() => _modoAtual = ModoPerfil.configuracoesApp)),
+            Icons.help_outline,
+            "Centro de Ajuda",
+            "FAQs e suporte direto",
+            () => setState(() => _modoAtual = ModoPerfil.centroAjuda)),
         const Divider(height: 40),
         _itemBotaoMenu(Icons.dashboard_outlined, "Retornar ao Dashboard",
             "Voltar à página inicial", () => context.go('/dashboard')),
         _itemBotaoMenu(
             Icons.logout, "Terminar Sessão", "Sair da plataforma em segurança",
             () async {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool('isLogged', false); // Apaga a sessão da memória
-          context.go('/');
+          await ApiServico().terminarSessao();
+          if (mounted) context.go('/');
         }, corDestaque: Colors.red),
       ],
     );
@@ -296,21 +404,29 @@ class _PerfilViewState extends State<PerfilView> {
         const Text("Qual a sua Service Line primária?",
             style: TextStyle(fontSize: 13, color: Colors.grey)),
         const SizedBox(height: 5),
-        _dropdownSimples(
-            "Service Line",
-            _slEscolhida,
-            ["Hybrid Cloud", "DevOps", "Data & AI"],
-            (v) => setState(() => _slEscolhida = v!)),
+        TextField(
+          controller: TextEditingController(text: _slEscolhida),
+          readOnly: true,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.grey.shade200,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+        ),
 
         const SizedBox(height: 15),
         const Text("A sua área de especialização (relativa à Service Line):",
             style: TextStyle(fontSize: 13, color: Colors.grey)),
         const SizedBox(height: 5),
-        _dropdownSimples(
-            "Área de Especialização",
-            _areaEscolhida,
-            ["LowCode (Outsystems)", "Java", "C#"],
-            (v) => setState(() => _areaEscolhida = v!)),
+        TextField(
+          controller: TextEditingController(text: _areaEscolhida),
+          readOnly: true,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.grey.shade200,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+          ),
+        ),
         const SizedBox(height: 30),
 
         SizedBox(
@@ -350,80 +466,53 @@ class _PerfilViewState extends State<PerfilView> {
   }
 
   // ==========================================
-  // 3. CONFIGURAÇÕES DA APP (ESTADO 2)
+  // 3. CENTRO DE AJUDA (ESTADO 2)
   // ==========================================
-  Widget _construirConfiguracoes() {
+  Widget _construirCentroAjuda() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("Preferências de Idioma",
+        const Text("Dúvidas Frequentes (FAQs)",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 15),
-        const Text("Selecione o idioma da aplicação:",
-            style: TextStyle(fontSize: 13, color: Colors.grey)),
-        const SizedBox(height: 5),
-        _dropdownSimples(
-            "Idioma da Aplicação",
-            _idiomaEscolhido,
-            ["Português", "Inglês", "Espanhol"],
-            (v) => setState(() => _idiomaEscolhido = v!)),
+        _faqItem("O que são os Softinsa Badges?", "São uma forma de reconhecimento das suas competências e progressão dentro da Softinsa."),
+        _faqItem("Como posso obter Badges Premium?", "São atribuídos pelo Admin ou pelo seu Manager em contexto de avaliação."),
+        _faqItem("Como faço a candidatura a um Marco?", "Vá ao Catálogo, selecione um Marco, anexe provas e aguarde aprovação."),
         const SizedBox(height: 30),
-        const Text("Notificações e Avisos",
+        const Text("Contactos de Suporte",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 15),
-        SwitchListTile(
+        ListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text("Atualizações de Candidaturas",
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text("Alertas quando o SLL aprova ou rejeita.",
-              style: TextStyle(fontSize: 12)),
-          value: _notifAprovacoes,
-          activeColor: const Color(0xFF34659D),
-          onChanged: (v) => setState(() => _notifAprovacoes = v),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text("Avisos de Expiração",
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text("Avisa quando um badge está prestes a caducar.",
-              style: TextStyle(fontSize: 12)),
-          value: _notifExpiracao,
-          activeColor: const Color(0xFF34659D),
-          onChanged: (v) => setState(() => _notifExpiracao = v),
-        ),
-        const SizedBox(height: 30),
-        const Text("Integrações",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 15),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text("Sincronização com LinkedIn",
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: const Text(
-              "Permitir partilha automática de novas conquistas.",
-              style: TextStyle(fontSize: 12)),
-          value: _partilhaLinkedIn,
-          activeColor: const Color(0xFF0077b5),
-          onChanged: (v) => setState(() => _partilhaLinkedIn = v),
-        ),
-        const SizedBox(height: 40),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: ElevatedButton(
-            onPressed: _guardarAlteracoes,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0980E9),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            child: const Text("Guardar Configurações",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
+          leading: Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle),
+            child: const Icon(Icons.email_outlined, color: Colors.blue),
           ),
+          title: const Text("Email de Suporte", style: TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: const Text("badges@softinsa.pt"),
         ),
+        const SizedBox(height: 30),
+        const Center(
+          child: Text("Softinsa Badges © 2026\nDesenvolvido com Flutter", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)),
+        )
       ],
+    );
+  }
+
+  Widget _faqItem(String pergunta, String resposta) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: Text(pergunta, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 15),
+            child: Text(resposta, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+          )
+        ],
+      ),
     );
   }
 

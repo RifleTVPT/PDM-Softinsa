@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../database/bd_local_ajudante.dart';
 
 class ObjetivoView extends StatefulWidget {
   const ObjetivoView({super.key});
@@ -27,8 +28,17 @@ class _ObjetivoViewState extends State<ObjetivoView> {
     }
   }
 
-  void _salvarObjetivo() {
-    // Aqui farias a chamada à API ou BD Local futuramente
+  void _salvarObjetivo() async {
+    final db = await BDLocalAjudante().database;
+    await db.insert('OBJETIVO_TIMELINE', {
+      'TITULO': _tituloCtrl.text,
+      'DESCRICAO': _descCtrl.text,
+      'DATA_OBJETIVO': "${_dataLimite.day}/${_dataLimite.month}/${_dataLimite.year}",
+      'STATUS': 'Em Progresso',
+      'ORIGEM': 'Eu',
+    });
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
           content: Text("Objetivo Criado e Ativado!"),

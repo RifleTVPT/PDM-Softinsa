@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
+import '../database/bd_local_ajudante.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MeusBadgesView extends StatefulWidget {
   const MeusBadgesView({super.key});
@@ -12,33 +15,108 @@ class MeusBadgesView extends StatefulWidget {
 class _MeusBadgesViewState extends State<MeusBadgesView> {
   // Filtros
   final TextEditingController _pesquisaController = TextEditingController();
-  String _servicoEscolhido = "Todas as Áreas";
-  final List<String> _niveisSelecionados = ['A', 'B', 'C', 'D', 'E'];
-  final List<String> _todosNiveis = ['A', 'B', 'C', 'D', 'E'];
+  String _servicoEscolhido = "Todas as Service Lines";
+  String _areaEscolhida = "Todas as Áreas";
+  List<String> _niveisSelecionados = [];
+  List<String> _todosNiveis = [];
 
-  // Dados Mockados
-  final List<Map<String, dynamic>> _meusBadges = [
-    {
-      "id": 1,
-      "titulo": "LowCode (Outsystems) - Nível A",
-      "sl": "Hybrid Cloud",
-      "nivel": "A",
-      "data": "12/05/2025",
-      "status": "Aprovado",
-      "corStatus": Colors.green,
-      "icone": Icons.auto_awesome
-    },
-    {
-      "id": 2,
-      "titulo": "DevOps Practices - Nível B",
-      "sl": "DevOps",
-      "nivel": "B",
-      "data": "03/08/2025",
-      "status": "Aprovado",
-      "corStatus": Colors.green,
-      "icone": Icons.cloud_sync
-    },
-  ];
+  List<String> _todasServiceLines = ["Todas as Service Lines"];
+  List<String> _todasAreas = ["Todas as Áreas"];
+  
+  List<Map<String, dynamic>> _todosBadgesGlobais = [];
+
+  // Dados Dinâmicos
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _meusBadges = [];
+  int _idConsultor = -1;
+  int _idUtilizador = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarMeusBadges();
+  }
+
+  Future<void> _carregarMeusBadges() async {
+    final bd = BDLocalAjudante();
+    
+    // Tentar obter da DB o utilizador atual (mesma lógica do Catálogo)
+    final dbObj = await bd.database;
+    final users = await dbObj.rawQuery('SELECT ID_UTILIZADOR FROM UTILIZADOR LIMIT 1');
+    
+    int idUtilizador = 1; // Fallback default
+    if (users.isNotEmpty) {
+      idUtilizador = users.first['ID_UTILIZADOR'] as int;
+    } else {
+      // Tentar SharedPreferences se não houver na BD (apesar de raro)
+      final prefs = await SharedPreferences.getInstance();
+      idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+    }
+    
+    final dados = await bd.obterMeusBadges(idUtilizador);
+    final catalogo = await bd.obterCatalogo(idUtilizador);
+
+    if (!mounted) return;
+    
+    setState(() {
+      _idUtilizador = idUtilizador;
+      _meusBadges = dados;
+      if (dados.isNotEmpty) {
+        _idConsultor = dados.first['idConsultor'] ?? -1;
+      }
+      
+      // Armazenar os badges globais para construir os filtros com as mesmas opções do Catálogo
+      _todosBadgesGlobais = List<Map<String, dynamic>>.from(catalogo['todos']);
+      
+      // Construir Service Lines com base no Catálogo GLOBAL
+      _todasServiceLines = ["Todas as Service Lines", ..._todosBadgesGlobais.map((e) => e['sl'].toString()).toSet().toList()..sort()];
+
+      _atualizarAreasPorSL("Todas as Service Lines");
+
+      _isLoading = false;
+    });
+  }
+
+  void _atualizarAreasPorSL(String sl) {
+    _servicoEscolhido = sl;
+    _areaEscolhida = "Todas as Áreas";
+    if (sl == "Todas as Service Lines") {
+      _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.map((e) => e['area'].toString()).toSet()];
+    } else {
+      _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.where((e) => e['sl'] == sl).map((e) => e['area'].toString()).toSet()];
+    }
+    _atualizarNiveis();
+  }
+
+  void _atualizarNiveis() {
+    var badges = _todosBadgesGlobais;
+    if (_servicoEscolhido != "Todas as Service Lines") {
+      badges = badges.where((e) => e['sl'] == _servicoEscolhido).toList();
+    }
+    if (_areaEscolhida != "Todas as Áreas") {
+      badges = badges.where((e) => e['area'] == _areaEscolhida).toList();
+    }
+    _todosNiveis = badges.map((e) => e['nivel'].toString()).toSet().toList();
+    _todosNiveis.sort();
+    
+    // Se a lista de selecionados estiver vazia ou tiver algo inválido, resetamos
+    _niveisSelecionados.removeWhere((n) => !_todosNiveis.contains(n));
+    if (_niveisSelecionados.isEmpty) {
+      _niveisSelecionados = List.from(_todosNiveis);
+    }
+  }
+
+  Future<void> _abrirGaleriaGlobal() async {
+    if (_idUtilizador == -1) return;
+    final url = Uri.parse('https://softinsa-plataforma.onrender.com/galeria/$_idUtilizador');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível abrir a galeria global.')),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -61,15 +139,31 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
               .toString()
               .toLowerCase()
               .contains(_pesquisaController.text.toLowerCase());
-      bool slMatch = _servicoEscolhido == "Todas as Áreas" ||
+      bool slMatch = _servicoEscolhido == "Todas as Service Lines" ||
           badge["sl"] == _servicoEscolhido;
+      bool areaMatch = _areaEscolhida == "Todas as Áreas" ||
+          badge["area"] == _areaEscolhida;
       bool nivelMatch = _niveisSelecionados.contains(badge["nivel"]);
-      return textoMatch && slMatch && nivelMatch;
+      return textoMatch && slMatch && areaMatch && nivelMatch;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return LayoutConsultor(
+        corpo: const Center(child: CircularProgressIndicator(color: Color(0xFF34659D))),
+      );
+    }
+
+    // Safety checks para evitar crash no Dropdown devido ao Hot Reload (mantém o valor antigo)
+    if (!_todasServiceLines.contains(_servicoEscolhido)) {
+      _servicoEscolhido = _todasServiceLines.isNotEmpty ? _todasServiceLines.first : "Todas as Service Lines";
+    }
+    if (!_todasAreas.contains(_areaEscolhida)) {
+      _areaEscolhida = _todasAreas.isNotEmpty ? _todasAreas.first : "Todas as Áreas";
+    }
+
     List<Map<String, dynamic>> badgesVisiveis = _obterBadgesFiltrados();
 
     return LayoutConsultor(
@@ -86,7 +180,9 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
             physics: const BouncingScrollPhysics(),
             child: Column(
               children: [
-                // HEADER AZUL COM FILTROS
+                // ==========================================
+                // ZONA AZUL SUPERIOR (Filtros e Info)
+                // ==========================================
                 Container(
                   color: const Color(0xFF34659D),
                   padding: const EdgeInsets.only(
@@ -94,11 +190,34 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("Os Meus Badges",
-                          style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: const Text("Os Meus Badges",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white)),
+                          ),
+                          const SizedBox(width: 10),
+                          if (_idConsultor != -1)
+                            OutlinedButton.icon(
+                              onPressed: _abrirGaleriaGlobal,
+                              icon: const Icon(Icons.language, size: 14, color: Colors.white),
+                              label: const Text("Ver Galeria", style: TextStyle(color: Colors.white, fontSize: 11)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.white),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                            )
+                        ],
+                      ),
                       const SizedBox(height: 8),
                       const Text("Consulte e partilhe as suas competências.",
                           style: TextStyle(color: Colors.white70)),
@@ -123,40 +242,88 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                       ),
                       const SizedBox(height: 15),
 
-                      // Filtro de Área
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 15),
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(10)),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _servicoEscolhido,
-                            isExpanded: true,
-                            items: [
-                              "Todas as Áreas",
-                              "Hybrid Cloud",
-                              "DevOps",
-                              "Data & AI"
-                            ]
-                                .map((s) =>
-                                    DropdownMenuItem(value: s, child: Text(s)))
-                                .toList(),
-                            onChanged: (v) =>
-                                setState(() => _servicoEscolhido = v!),
+                      // Filtros Lado a Lado (Service Line e Area) em Cascata
+                      Row(
+                        children: [
+                          // Dropdown Service Line
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _servicoEscolhido,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                                  items: _todasServiceLines
+                                      .map((s) => DropdownMenuItem(
+                                            value: s,
+                                            child: Text(s, overflow: TextOverflow.ellipsis),
+                                          ))
+                                      .toList(),
+                                  onChanged: (v) {
+                                    setState(() {
+                                      _servicoEscolhido = v!;
+                                      _atualizarAreasPorSL(v);
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          // Dropdown Área
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _areaEscolhida,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                                  items: _todasAreas
+                                      .map((a) => DropdownMenuItem(
+                                            value: a,
+                                            child: Text(a, overflow: TextOverflow.ellipsis),
+                                          ))
+                                      .toList(),
+                                  onChanged: (v) {
+                                    setState(() {
+                                      _areaEscolhida = v!;
+                                      _atualizarNiveis();
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 15),
+                      const SizedBox(height: 20),
 
                       // Filtro de Níveis
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: _todosNiveis.map((n) {
-                          bool sel = _niveisSelecionados.contains(n);
-                          return GestureDetector(
-                            onTap: () => _alternarNivel(n),
-                            child: Container(
+                      const Text("Filtrar por Nível:",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: Colors.white70)),
+                      const SizedBox(height: 10),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _todosNiveis.map((n) {
+                            bool sel = _niveisSelecionados.contains(n);
+                            return GestureDetector(
+                              onTap: () => _alternarNivel(n),
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 15),
                               width: 40,
                               height: 40,
                               alignment: Alignment.center,
@@ -174,11 +341,14 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                           );
                         }).toList(),
                       ),
+                      ),
                     ],
                   ),
                 ),
 
-                // CORPO CINZA COM OS CARDS
+                // ==========================================
+                // ZONA BRANCA INFERIOR (Resultados)
+                // ==========================================
                 Container(
                   color: const Color(0xFFF4F5F9),
                   padding: const EdgeInsets.all(20),
@@ -240,30 +410,82 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFF0F0F0),
                     shape: BoxShape.circle,
-                    border:
-                        Border.all(color: const Color(0xFFC0C0C0), width: 4),
+                    border: Border.all(color: const Color(0xFF34659D), width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.blue.withOpacity(0.15),
+                          blurRadius: 15,
+                          spreadRadius: 2)
+                    ],
                   ),
-                  child: Icon(badge['icone'],
-                      size: 40, color: Colors.grey.shade600),
+                  child: ClipOval(
+                    child: badge['urlImagem'] != null && badge['urlImagem'].toString().isNotEmpty
+                      ? (badge['urlImagem'].toString().startsWith('http')
+                          ? Image.network(badge['urlImagem'], fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D)))
+                          : Image.asset('assets/images/${badge['urlImagem']}', fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D))))
+                      : const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D)),
+                  ),
                 ),
+                const SizedBox(height: 15),
+                Text("Conquistado a ${_formatarData(badge['data'])}",
+                    style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
+                _widgetExpiracao(badge),
                 const SizedBox(height: 15),
                 Text(badge['titulo'],
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 5),
-                Text("Área: ${badge['sl']}",
-                    style:
-                        const TextStyle(fontSize: 13, color: Colors.blueGrey)),
+                        fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A))),
+                const SizedBox(height: 8),
+                Text("${badge['sl']}",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF34659D))),
+                const SizedBox(height: 4),
+                Text("${badge['area']} - ${badge['nomeNivel'] ?? 'Nível ${badge['nivel']}'}",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13, color: Colors.blueGrey)),
                 const SizedBox(height: 15),
+
+                // Requisitos e Pontos
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF4F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Column(
+                        children: [
+                          const Text("Requisitos", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          const SizedBox(height: 2),
+                          Text("${badge['numeroRequisitos'] ?? 0}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        ],
+                      ),
+                      Container(width: 1, height: 30, color: Colors.black12),
+                      Column(
+                        children: [
+                          const Text("Pontos", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          const SizedBox(height: 2),
+                          Text("${badge['pontos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF4C51F7))),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Botão de Ver Detalhes
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () => context.push('/badge_detalhe'),
+                    onPressed: () => context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'meus_badges'}),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0980E9),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20)),
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      elevation: 0,
                     ),
                     child: const Text("Ver Detalhes do Badge",
                         style: TextStyle(
@@ -273,28 +495,54 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
               ],
             ),
           ),
-          // Rodapé do Status
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: const BoxDecoration(
-              border: Border(top: BorderSide(color: Colors.black12)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.circle, color: badge['corStatus'], size: 10),
-                const SizedBox(width: 8),
-                Text("Status: ${badge['status']}",
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black54)),
-              ],
-            ),
-          ),
         ],
       ),
     );
+  }
+
+  String _formatarData(String? dataIso) {
+    if (dataIso == null) return "N/D";
+    try {
+      DateTime data = DateTime.parse(dataIso);
+      return "${data.day.toString().padLeft(2, '0')}/${data.month.toString().padLeft(2, '0')}/${data.year}";
+    } catch (e) {
+      return dataIso;
+    }
+  }
+
+  Widget _widgetExpiracao(Map<String, dynamic> badge) {
+    if (badge['validadeMeses'] == null || badge['validadeMeses'] == 0) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 5),
+        child: Text("Premium (Sem expiração)", style: TextStyle(fontSize: 12, color: Color(0xFF34659D), fontWeight: FontWeight.bold)),
+      );
+    }
+    
+    if (badge['dataExpiracao'] != null) {
+      try {
+        DateTime expiracao = DateTime.parse(badge['dataExpiracao']);
+        int dias = expiracao.difference(DateTime.now()).inDays;
+        
+        if (dias < 0) {
+          return const Padding(
+            padding: EdgeInsets.only(top: 5),
+            child: Text("Expirado", style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
+          );
+        } else if (dias < 30) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text("Expira em $dias dias", style: const TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.bold)),
+          );
+        } else {
+          return Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Text("Expira em $dias dias", style: const TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.bold)),
+          );
+        }
+      } catch (e) {
+        return const SizedBox();
+      }
+    }
+    return const SizedBox();
   }
 }

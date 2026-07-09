@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../services/api_servico.dart';
+import '../components/layout_consultor.dart';
 import '../models/notificacao_model.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../database/bd_local_ajudante.dart';
 
 class NotificacoesView extends StatefulWidget {
   const NotificacoesView({super.key});
@@ -9,220 +14,327 @@ class NotificacoesView extends StatefulWidget {
 }
 
 class _NotificacoesViewState extends State<NotificacoesView> {
-  static const azulSoftinsa = Color(0xFF1A468D);
-
-  // A lista deixou de ser 'final' dentro do build para poder ser alterada no estado
-  late List<NotificacaoModel> listaNotificacoes;
+  List<NotificacaoModel> _notificacoes = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    // Inicializamos a lista com os teus dados mockados
-    listaNotificacoes = [
-      NotificacaoModel(
-        idNotificacao: 1,
-        tituloNotificacao: "Novo badge disponível!",
-        dataEnvioNotificacao: "26/11/2025",
-        mensagemNotificacao:
-            "Foi criado um novo badge para a Hybrid Cloud Service Line, com a área de aprendizagem de LowCode (Outsystems)",
-        estadoLido: 0,
-      ),
-      NotificacaoModel(
-        idNotificacao: 2,
-        tituloNotificacao: "Manutenção Programada!",
-        dataEnvioNotificacao: "20/11/2025",
-        mensagemNotificacao:
-            "Informa-se que a aplicação passará por manutenção no dia 21/11 das 00:00 até às 04:00. Agradece-se a compreensão.",
-        estadoLido: 0,
-      ),
-      NotificacaoModel(
-        idNotificacao: 3,
-        tituloNotificacao: "Pedido de Badge aceite!",
-        dataEnvioNotificacao: "19/11/2025",
-        mensagemNotificacao:
-            "Boas notícias! O seu pedido de obtenção do Badge LowCode (Outsystems) - Nível A da Service Line Hybrid Cloud foi aceite !",
-        estadoLido: 0,
-      ),
-    ];
+    _carregarNotificacoes();
   }
 
-  // Função para marcar UMA notificação específica como lida
-  void _marcarComoLida(int index) {
+  Future<void> _carregarNotificacoes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+
+    final bdDados = await BDLocalAjudante().obterNotificacoes(idUtilizador);
+    
+    if (!mounted) return;
     setState(() {
-      // Cria uma cópia do modelo com o estadoLido atualizado para 1
-      final notifAtual = listaNotificacoes[index];
-      listaNotificacoes[index] = NotificacaoModel(
-        idNotificacao: notifAtual.idNotificacao,
-        tituloNotificacao: notifAtual.tituloNotificacao,
-        dataEnvioNotificacao: notifAtual.dataEnvioNotificacao,
-        mensagemNotificacao: notifAtual.mensagemNotificacao,
-        estadoLido: 1, // Atualiza o estado
-      );
+      _notificacoes = bdDados.map((row) => NotificacaoModel(
+        idNotificacao: row['ID_NOTIFICACAO'],
+        tituloNotificacao: row['TITULO_NOTIFICACAO'],
+        mensagemNotificacao: row['MENSAGEM_NOTIFICACAO'],
+        dataEnvioNotificacao: row['DATA_ENVIO_NOTIFICACAO'],
+        tipoNotificacao: row['TIPO_NOTIFICACAO'] ?? 'aviso',
+        estadoLido: row['ESTADO_LIDO'],
+      )).toList();
+      _isLoading = false;
     });
   }
 
-  // Função para marcar TODAS as notificações como lidas
-  void _marcarTodasComoLidas() {
+  void _marcarTodasComoLidas() async {
+    final prefs = await SharedPreferences.getInstance();
+    final idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+    
+    final db = await BDLocalAjudante().database;
+    await db.rawUpdate('UPDATE NOTIFICACAO SET ESTADO_LIDO = 1');
+    
+    ApiServico().marcarTodasNotificacoesComoLidas(idUtilizador);
+    
     setState(() {
-      for (int i = 0; i < listaNotificacoes.length; i++) {
-        final notifAtual = listaNotificacoes[i];
-        if (notifAtual.estadoLido == 0) {
-          listaNotificacoes[i] = NotificacaoModel(
-            idNotificacao: notifAtual.idNotificacao,
-            tituloNotificacao: notifAtual.tituloNotificacao,
-            dataEnvioNotificacao: notifAtual.dataEnvioNotificacao,
-            mensagemNotificacao: notifAtual.mensagemNotificacao,
-            estadoLido: 1,
-          );
-        }
+      for (var i = 0; i < _notificacoes.length; i++) {
+        _notificacoes[i] = NotificacaoModel(
+          idNotificacao: _notificacoes[i].idNotificacao,
+          tituloNotificacao: _notificacoes[i].tituloNotificacao,
+          mensagemNotificacao: _notificacoes[i].mensagemNotificacao,
+          dataEnvioNotificacao: _notificacoes[i].dataEnvioNotificacao,
+          tipoNotificacao: _notificacoes[i].tipoNotificacao,
+          estadoLido: 1,
+        );
       }
     });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text("Todas as notificações foram marcadas como lidas.")),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F2F5),
-      appBar: AppBar(
-        backgroundColor: azulSoftinsa,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+  String _formatarData(String dataIso) {
+    try {
+      if (dataIso.isEmpty) return "";
+      DateTime dt = DateTime.parse(dataIso).toLocal();
+      return DateFormat('dd/MM/yyyy HH:mm').format(dt);
+    } catch (e) {
+      return dataIso;
+    }
+  }
+
+  void _verDetalhesNotificacao(NotificacaoModel notif) async {
+    if (notif.estadoLido == 0) {
+      final db = await BDLocalAjudante().database;
+      await db.update('NOTIFICACAO', {'ESTADO_LIDO': 1}, where: 'ID_NOTIFICACAO = ?', whereArgs: [notif.idNotificacao]);
+      ApiServico().marcarNotificacaoComoLida(notif.idNotificacao ?? 0);
+    }
+
+    setState(() {
+      int idx = _notificacoes
+          .indexWhere((n) => n.idNotificacao == notif.idNotificacao);
+      if (idx != -1) {
+        _notificacoes[idx] = NotificacaoModel(
+          idNotificacao: notif.idNotificacao,
+          tituloNotificacao: notif.tituloNotificacao,
+          mensagemNotificacao: notif.mensagemNotificacao,
+          dataEnvioNotificacao: notif.dataEnvioNotificacao,
+          tipoNotificacao: notif.tipoNotificacao,
+          estadoLido: 1,
+        );
+      }
+    });
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(_obterIcone(notif.tipoNotificacao),
+                color: _obterCor(notif.tipoNotificacao)),
+            const SizedBox(width: 10),
+            const Expanded(
+                child: Text("Detalhes da Notificação",
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+          ],
         ),
-        title: const Text(
-          "Notificações e Avisos",
-          style: TextStyle(color: Colors.white),
-        ),
-        centerTitle: true,
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(20),
-              itemCount: listaNotificacoes.length,
-              itemBuilder: (context, index) {
-                final item = listaNotificacoes[index];
-                return _buildNotificacaoCard(item, index);
-              },
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(notif.tituloNotificacao,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 10),
+            Text(notif.mensagemNotificacao,
+                style: const TextStyle(color: Colors.black87, height: 1.4)),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
+                const SizedBox(width: 5),
+                Expanded(child: Text("Recebido: ${_formatarData(notif.dataEnvioNotificacao)}",
+                    style: const TextStyle(fontSize: 12, color: Colors.grey))),
+              ],
             ),
-          ),
+          ],
+        ),
+        actions: [
           TextButton(
-            // Chamamos a função ao clicar
-            onPressed: _marcarTodasComoLidas,
-            child: const Text(
-              "Marcar todas como lidas",
-              style: TextStyle(
-                color: azulSoftinsa,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Fechar",
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, color: Color(0xFF34659D))),
+          )
         ],
       ),
     );
   }
 
-  // Passamos o 'index' para saber qual notificação clicar
-  Widget _buildNotificacaoCard(NotificacaoModel notif, int index) {
-    final bool estaLida = notif.estadoLido == 1;
+  Color _obterCor(String tipo) {
+    switch (tipo) {
+      case 'aprovado':
+        return Colors.green;
+      case 'rejeitado':
+        return Colors.red;
+      case 'expiracao':
+        return Colors.orange;
+      default:
+        return const Color(0xFF34659D);
+    }
+  }
 
-    final Color corFundoCard = estaLida
-        ? const Color(0xFFEAECEF)
-        : Colors.white;
-    final Color corTextoPrincipal = estaLida
-        ? Colors.grey.shade600
-        : Colors.black87;
-    final Color corTextoSecundario = estaLida
-        ? Colors.grey.shade500
-        : Colors.grey;
-    final Color corIconeLateral = estaLida
-        ? Colors.grey
-        : const Color(0xFF1A468D);
+  IconData _obterIcone(String tipo) {
+    switch (tipo) {
+      case 'aprovado':
+        return Icons.check_circle_outline;
+      case 'rejeitado':
+        return Icons.error_outline;
+      case 'expiracao':
+        return Icons.warning_amber_rounded;
+      default:
+        return Icons.notifications_none_outlined;
+    }
+  }
 
-    // Envolver o card num InkWell torna-o clicável
-    return InkWell(
-      onTap: () {
-        if (!estaLida) {
-          _marcarComoLida(index); // Marca como lida apenas se não estiver
-        }
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 20),
-        decoration: BoxDecoration(
-          color: corFundoCard,
-          borderRadius: BorderRadius.circular(12),
-          border: estaLida ? Border.all(color: Colors.grey.shade300) : null,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: IntrinsicHeight(
+  @override
+  Widget build(BuildContext context) {
+    return LayoutConsultor(
+      corpo: Column(
+        children: [
+          // HEADER DA PÁGINA COM EXPANDED
+          Container(
+            width: double.infinity,
+            color: const Color(0xFF34659D),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(width: 6, color: corIconeLateral),
-                const SizedBox(width: 15),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 15,
-                      horizontal: 5,
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: corIconeLateral.withOpacity(0.1),
-                          child: Icon(
-                            estaLida
-                                ? Icons.drafts_outlined
-                                : Icons.mark_email_unread_outlined,
-                            color: corIconeLateral,
-                          ),
-                        ),
-                        const SizedBox(width: 15),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                notif.tituloNotificacao,
-                                style: TextStyle(
-                                  fontWeight: estaLida
-                                      ? FontWeight.normal
-                                      : FontWeight.bold,
-                                  fontSize: 16,
-                                  color: corTextoPrincipal,
-                                ),
-                              ),
-                              Text(
-                                notif.dataEnvioNotificacao,
-                                style: TextStyle(
-                                  color: corTextoSecundario,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                notif.mensagemNotificacao,
-                                style: TextStyle(
-                                  color: corTextoSecundario,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Notificações",
+                          style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                      SizedBox(height: 4),
+                      Text("Mantenha-se atualizado sobre os seus pedidos.",
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
                   ),
                 ),
+                // NOVA LÓGICA DO ÍCONE COM TEXTO POR BAIXO
+                GestureDetector(
+                  onTap: _marcarTodasComoLidas,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.done_all, color: Colors.white, size: 24),
+                      SizedBox(height: 4),
+                      Text(
+                        "Marcar lidas",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold),
+                      )
+                    ],
+                  ),
+                )
               ],
             ),
           ),
-        ),
+
+          // LISTAGEM REATIVA
+          Expanded(
+            child: _notificacoes.isEmpty
+                ? const Center(
+                    child: Text("Não tem nenhuma notificação de momento.",
+                        style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+                    padding: const EdgeInsets.all(15),
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: _notificacoes.length,
+                    itemBuilder: (context, index) {
+                      final item = _notificacoes[index];
+                      bool lido = item.estadoLido == 1;
+
+                      return GestureDetector(
+                        onTap: () => _verDetalhesNotificacao(item),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(15),
+                          decoration: BoxDecoration(
+                            color:
+                                lido ? const Color(0xFFF7F8FA) : Colors.white,
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(color: Colors.black12, width: 1),
+                            boxShadow: lido
+                                ? []
+                                : [
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4))
+                                  ],
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // ÍCONE
+                              CircleAvatar(
+                                radius: 22,
+                                backgroundColor: _obterCor(item.tipoNotificacao)
+                                    .withOpacity(lido ? 0.05 : 0.1),
+                                child: Icon(
+                                  _obterIcone(item.tipoNotificacao),
+                                  color: _obterCor(item.tipoNotificacao)
+                                      .withOpacity(lido ? 0.4 : 1.0),
+                                  size: 24,
+                                ),
+                              ),
+                              const SizedBox(width: 15),
+
+                              // TEXTOS (COM EXPANDED PARA EVITAR OVERFLOW)
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.tituloNotificacao,
+                                      style: TextStyle(
+                                        fontWeight: lido
+                                            ? FontWeight.w600
+                                            : FontWeight.bold,
+                                        color: lido
+                                            ? Colors.black54
+                                            : const Color(0xFF1A1A1A),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      item.mensagemNotificacao,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          color: lido
+                                              ? Colors.black38
+                                              : Colors.black87,
+                                          fontSize: 12,
+                                          height: 1.3),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _formatarData(item.dataEnvioNotificacao),
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: lido
+                                              ? Colors.grey.shade400
+                                              : Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // ÍCONE "NEW"
+                              if (!lido)
+                                const Padding(
+                                  padding: EdgeInsets.only(left: 10),
+                                  child: Icon(Icons.fiber_new,
+                                      color: Color(0xFF0980E9), size: 30),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

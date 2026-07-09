@@ -1,70 +1,258 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import '../database/bd_local_ajudante.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/conectividade_servico.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../services/api_servico.dart';
 
 // Enum para definir de onde viemos (estado do badge)
 enum ModoDetalheBadge { catalogo, obtidoNormal, obtidoPremium }
 
 class BadgeDetalheView extends StatefulWidget {
-  // Num cenário real com a API, receberíamos o ID do badge e o Modo via GoRouter
-  const BadgeDetalheView({super.key});
+  final int idBadge;
+  final String? from;
+  
+  const BadgeDetalheView({super.key, required this.idBadge, this.from});
 
   @override
   State<BadgeDetalheView> createState() => _BadgeDetalheViewState();
 }
 
 class _BadgeDetalheViewState extends State<BadgeDetalheView> {
-  // VARIÁVEL DE TESTE: Altera isto para testares os diferentes ecrãs
   ModoDetalheBadge _modoAtual = ModoDetalheBadge.catalogo;
+  bool _isLoading = true;
+  Map<String, dynamic>? _badgeData;
+  int _idUtilizador = 1;
 
-  // Mock de Dados do Badge
-  final Map<String, dynamic> _badgeMock = {
-    "titulo": "LowCode (Outsystems) - Nível A",
-    "sl": "Hybrid Cloud",
-    "descricao":
-        "A equipa de OutSystems da Softinsa recorre ao desenvolvimento visual de alta produtividade para implementar e gerir aplicações em qualquer dispositivo.",
-    "pontos": 150,
-    "dataObtencao": "12/05/2025",
-    "linkUnico": "https://softinsa.pt/verify/12345", // Para partilha
-    "requisitosTotal": 3,
-    "requisitos": [
-      {
-        "id": "A1",
-        "desc": "Conclusão do Curso de Web Developer em Outsystems",
-        "concluido": true
-      },
-      {
-        "id": "A2",
-        "desc": "Aprovação do Projeto na fase final da academia",
-        "concluido": true
-      },
-      {
-        "id": "A3",
-        "desc": "Integração num Projeto de desenvolvimento",
-        "concluido": false
-      },
-    ]
-  };
+  @override
+  void initState() {
+    super.initState();
+    _carregarBadge();
+  }
 
-  void _partilharLinkedIn() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('A abrir o LinkedIn com o seu link único de badge...'),
-        backgroundColor: Color(0xFF0077b5), // Azul LinkedIn
-      ),
+  Future<void> _carregarBadge() async {
+    final bd = BDLocalAjudante();
+    final prefs = await SharedPreferences.getInstance();
+    final idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+
+    final detalhe = await bd.obterBadgeDetalhe(widget.idBadge, idUtilizador);
+    
+    if (!mounted) return;
+    setState(() {
+      _idUtilizador = idUtilizador;
+      _badgeData = detalhe;
+      if (detalhe != null) {
+        if (widget.from == 'catalogo') {
+          _modoAtual = ModoDetalheBadge.catalogo;
+        } else if (detalhe['obtido'] == true) {
+          _modoAtual = detalhe['isPremium'] == true ? ModoDetalheBadge.obtidoPremium : ModoDetalheBadge.obtidoNormal;
+        } else {
+          _modoAtual = ModoDetalheBadge.catalogo;
+        }
+      }
+      _isLoading = false;
+    });
+  }
+
+  String _formatarData(String? dataIso) {
+    if (dataIso == null) return '';
+    try {
+      DateTime dt = DateTime.parse(dataIso);
+      return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}";
+    } catch (e) {
+      return dataIso;
+    }
+  }
+
+  void _partilharLinkedIn() async {
+    bool temNet = await ConectividadeServico().temInternet();
+    if (!temNet) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Precisa de internet para partilhar.'), backgroundColor: Colors.red));
+      return;
+    }
+    
+    if (_badgeData == null || _badgeData!['linkUnico'] == null) return;
+    
+    final urlPublica = "https://softinsa-plataforma.onrender.com/verificacao/${_badgeData!['linkUnico']}";
+    final urlPartilha = "https://softinsa-api-riya.onrender.com/partilha/linkedin/badge/${_badgeData!['linkUnico']}";
+    
+    final texto = 'Acabei de conquistar o badge "${_badgeData!['titulo']}" na Plataforma de Badges Softinsa!\n\n'
+        '• Service Line: ${_badgeData!['serviceLine'] ?? 'Geral'}\n'
+        '• Área: ${_badgeData!['area'] ?? 'Geral'}\n'
+        '• Nível: ${_badgeData!['nivel'] ?? 'Geral'}\n'
+        '• Atribuído a: ${_formatarData(_badgeData!['dataObtencao'])}\n'
+        '• Validade: ${_badgeData!['dataExpiracao'] == null ? 'Sem validade (Vitalício)' : 'Até ${_formatarData(_badgeData!['dataExpiracao'])}'}';
+
+    final textoParaCopiar = '$texto\n\nDescubra mais aqui: $urlPublica\n#Softinsa #Badges #Certificação';
+    
+    await Clipboard.setData(ClipboardData(text: textoParaCopiar));
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Texto copiado! A abrir LinkedIn para partilha... Cole o texto na sua publicação.'),
+          backgroundColor: Color(0xFF0077b5),
+        ),
+      );
+    }
+    
+    final linkedinUrl = Uri.parse("https://www.linkedin.com/sharing/share-offsite/?url=${Uri.encodeComponent(urlPartilha)}");
+    await launchUrl(linkedinUrl, mode: LaunchMode.externalApplication);
+  }
+
+  void _downloadCertificado() async {
+    bool temNet = await ConectividadeServico().temInternet();
+    if (!temNet) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Precisa de internet para transferir.'), backgroundColor: Colors.red));
+      return;
+    }
+    
+    if (_badgeData == null) return;
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('A iniciar download do Certificado Oficial...'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+    
+    final urlCertificado = Uri.parse("https://softinsa-api-riya.onrender.com/meus-badges/consultor/$_idUtilizador/badge/${widget.idBadge}/certificado");
+    await launchUrl(urlCertificado, mode: LaunchMode.externalApplication);
+  }
+
+  Widget _buildIconBadgeFallback() {
+    return Icon(
+      _modoAtual == ModoDetalheBadge.obtidoPremium
+          ? Icons.workspace_premium
+          : Icons.shield,
+      size: 80,
+      color: _modoAtual == ModoDetalheBadge.obtidoPremium
+          ? Colors.amber.shade700
+          : const Color(0xFF34659D),
     );
   }
 
-  void _downloadCertificado() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('A gerar e a transferir Certificado PDF...'),
-        backgroundColor: Colors.green,
+  void _abrirLinkPublico() async {
+    if (_badgeData == null || _badgeData!['linkUnico'] == null) return;
+    final url = Uri.parse("https://softinsa-plataforma.onrender.com/verificacao/${_badgeData!['linkUnico']}");
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Não foi possível abrir o link.')));
+    }
+  }
+
+  void _renovarBadge() async {
+    if (_badgeData == null) return;
+    
+    int diasRestantes = 0;
+    if (_badgeData!['dataExpiracao'] != null) {
+      DateTime dataExp = DateTime.parse(_badgeData!['dataExpiracao']);
+      diasRestantes = dataExp.difference(DateTime.now()).inDays;
+    }
+
+    final bool confirmar = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Renovar Badge'),
+        content: const Text('Deseja iniciar o processo de renovação? O Badge deixará de estar ativo no seu perfil até ser novamente aprovado (se tiver 0 dias).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Renovar', style: TextStyle(color: Colors.red))),
+        ],
       ),
-    );
+    ) ?? false;
+
+    if (!confirmar) return;
+
+    bool temNet = await ConectividadeServico().temInternet();
+
+    // Se estiver online, forçar o apagamento imediato na cloud (API)
+    if (temNet && diasRestantes <= 0) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('jwtToken') ?? '';
+        final res = await http.post(
+          Uri.parse('${ApiServico.baseUrl}/pedidos/consultor/renovar'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token'
+          },
+          body: jsonEncode({
+            'idUtilizador': _idUtilizador,
+            'idBadge': widget.idBadge
+          })
+        );
+        
+        if (res.statusCode != 200 && res.statusCode != 201) {
+          final erro = jsonDecode(res.body)['message'] ?? 'Erro ao renovar.';
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro da API: $erro'), backgroundColor: Colors.red));
+          return; // Cancelar fluxo pois a API falhou
+        }
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falha na comunicação com o servidor. A manter offline.'), backgroundColor: Colors.orange));
+        // Se a internet estiver instável e falhar, prossegue com o fluxo offline (apaga apenas local)
+      }
+    }
+
+    final dbHelper = BDLocalAjudante();
+    final db = await dbHelper.database;
+    
+    final resultConsultor = await db.rawQuery('SELECT ID_CONSULTOR FROM CONSULTOR WHERE ID_UTILIZADOR = ?', [_idUtilizador]);
+    if (resultConsultor.isEmpty) return;
+    int idConsultor = resultConsultor.first['ID_CONSULTOR'] as int;
+
+    if (diasRestantes <= 0) {
+      // Remover badge localmente (vai para o catálogo) pois expirou totalmente
+      await db.rawDelete('DELETE FROM CONSULTOR_BADGE WHERE ID_CONSULTOR = ? AND ID_BADGE = ?', [idConsultor, widget.idBadge]);
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pronto a renovar! Anexe as novas evidências para prosseguir.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      // Redireciona para o ecrã de candidatura igual à Web!
+      context.push('/candidatura', extra: {'idBadge': widget.idBadge});
+    }
+  }
+
+  void _partilharEmail() async {
+    if (_badgeData == null) return;
+    
+    final urlPublica = "https://softinsa-plataforma.onrender.com/verificacao/${_badgeData!['linkUnico'] ?? ''}";
+    final assinaturaBase = 'Conquistei o badge "${_badgeData!['titulo']}" da Softinsa!\nVerifique o meu badge oficial aqui:\n$urlPublica';
+    
+    await Clipboard.setData(ClipboardData(text: assinaturaBase));
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Assinatura copiada para a área de transferência! Pode colar diretamente no seu email (Outlook/Gmail).'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_badgeData == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Erro')),
+        body: const Center(child: Text('Badge não encontrado.')),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F5F9), // Fundo Cinza claro global
       appBar: AppBar(
@@ -85,23 +273,6 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
       ),
       body: Column(
         children: [
-          // =========================================================
-          // BARRA DE TESTE TEMPORÁRIA (APAGAR DEPOIS DE LIGAR À API)
-          // =========================================================
-          Container(
-            color: Colors.orange.shade100,
-            padding: const EdgeInsets.all(8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _btnTeste("Catálogo", ModoDetalheBadge.catalogo),
-                _btnTeste("Obtido", ModoDetalheBadge.obtidoNormal),
-                _btnTeste("Premium", ModoDetalheBadge.obtidoPremium),
-              ],
-            ),
-          ),
-          // =========================================================
-
           Expanded(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
@@ -109,66 +280,81 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // MENSAGEM DE PARABÉNS (Só aparece se já foi obtido)
+                  // MENSAGEM DE PARABÉNS (Só aparece se já foi obtido e NAO veio do catalogo global)
                   if (_modoAtual != ModoDetalheBadge.catalogo) ...[
-                    const Icon(Icons.emoji_events,
-                        color: Colors.amber, size: 50),
-                    const SizedBox(height: 10),
-                    const Text(
-                      "Parabéns, obteve este Badge!",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1A1A1A)),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 15),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF34659D), Color(0xFF0980E9)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(15),
+                        boxShadow: [
+                          BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))
+                        ]
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.emoji_events, color: Colors.amber, size: 50),
+                          const SizedBox(height: 10),
+                          const Text(
+                            "Parabéns, obteve este Badge!",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      "Conquistado a ${_badgeMock['dataObtencao']}",
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.green),
-                    ),
+                    const SizedBox(height: 20),
+
                     const SizedBox(height: 30),
                   ],
 
                   // ÍCONE DO BADGE CENTRAL
-                  Container(
-                    padding: const EdgeInsets.all(25),
-                    decoration: BoxDecoration(
-                      color: _modoAtual == ModoDetalheBadge.obtidoPremium
-                          ? Colors.amber.withOpacity(0.1)
-                          : Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(
+                  GestureDetector(
+                    onTap: () {
+                      if (_badgeData!['obtido'] == true && _badgeData!['linkUnico'] != null) {
+                        _abrirLinkPublico();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(25),
+                      decoration: BoxDecoration(
                         color: _modoAtual == ModoDetalheBadge.obtidoPremium
-                            ? Colors.amber
-                            : const Color(0xFF34659D),
-                        width: 4,
+                            ? Colors.amber.withOpacity(0.1)
+                            : Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _modoAtual == ModoDetalheBadge.obtidoPremium
+                              ? Colors.amber
+                              : const Color(0xFF34659D),
+                          width: 4,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.blue.withOpacity(0.15),
+                              blurRadius: 20,
+                              spreadRadius: 5)
+                        ],
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.blue.withOpacity(0.15),
-                            blurRadius: 20,
-                            spreadRadius: 5)
-                      ],
-                    ),
-                    child: Icon(
-                      _modoAtual == ModoDetalheBadge.obtidoPremium
-                          ? Icons.workspace_premium
-                          : Icons.shield,
-                      size: 80,
-                      color: _modoAtual == ModoDetalheBadge.obtidoPremium
-                          ? Colors.amber.shade700
-                          : const Color(0xFF34659D),
+                      child: _badgeData!['urlImagem'] != null && _badgeData!['urlImagem'].toString().isNotEmpty
+                        ? _badgeData!['urlImagem'].toString().startsWith('http')
+                            ? ClipOval(child: Image.network(_badgeData!['urlImagem'], width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (c,e,s) => _buildIconBadgeFallback()))
+                            : ClipOval(child: Image.asset('assets/images/${_badgeData!['urlImagem']}', width: 80, height: 80, fit: BoxFit.cover, errorBuilder: (c,e,s) => _buildIconBadgeFallback()))
+                        : _buildIconBadgeFallback(),
                     ),
                   ),
                   const SizedBox(height: 25),
 
                   // TÍTULO E SERVICE LINE
                   Text(
-                    _badgeMock['titulo'],
+                    _badgeData!['titulo'],
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                         fontSize: 22,
@@ -177,15 +363,17 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    "Service Line: ${_badgeMock['sl']}",
+                    "Service Line: ${_badgeData!['sl']}\nÁrea: ${_badgeData!['area']} | Nível ${_badgeData!['nivel']}",
+                    textAlign: TextAlign.center,
                     style: const TextStyle(
                         fontSize: 14,
                         color: Colors.blueGrey,
-                        fontWeight: FontWeight.bold),
+                        fontWeight: FontWeight.bold,
+                        height: 1.4),
                   ),
                   const SizedBox(height: 20),
 
-                  // PONTUAÇÃO (Pill)
+                  // PONTUAÇÃO (Pill) E EXPIRAÇÃO (SE CATÁLOGO)
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 20, vertical: 10),
@@ -200,7 +388,7 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
                             color: Color(0xFF34659D), size: 24),
                         const SizedBox(width: 8),
                         Text(
-                          "+ ${_badgeMock['pontos']} Pontos",
+                          "+ ${_badgeData!['pontos']} Pontos",
                           style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
@@ -209,6 +397,46 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
                       ],
                     ),
                   ),
+                  if (_modoAtual == ModoDetalheBadge.catalogo) ...[
+                    const SizedBox(height: 15),
+                    Text(
+                      _badgeData!['isPremium'] == false 
+                          ? "Expiração: ${_badgeData!['validadeMeses'] ?? 12} meses após obtenção" 
+                          : "Sem expiração",
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: _badgeData!['isPremium'] == false ? Colors.orange : Colors.green),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 15),
+                    Text(
+                      "Conquistado a ${_formatarData(_badgeData!['dataObtencao'])}",
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green),
+                    ),
+                    const SizedBox(height: 5),
+                    if (_modoAtual == ModoDetalheBadge.obtidoNormal)
+                      Text(
+                        _badgeData!['dataExpiracao'] != null 
+                            ? "Expira a ${_formatarData(_badgeData!['dataExpiracao'])}" 
+                            : "Válido por ${_badgeData!['validadeMeses']} meses",
+                        style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange),
+                      )
+                    else
+                      const Text(
+                        "Premium (Sem expiração)",
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF34659D)),
+                      ),
+                  ],
                   const SizedBox(height: 35),
 
                   // ==========================================
@@ -233,13 +461,13 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
   // WIDGET 1: Requisitos (Modo Catálogo)
   Widget _construirRequisitosCatalogo() {
     int reqFeitos =
-        _badgeMock['requisitos'].where((r) => r['concluido'] == true).length;
-    int totalReq = _badgeMock['requisitosTotal'];
+        _badgeData!['requisitos'].where((r) => r['concluido'] == true).length;
+    int totalReq = _badgeData!['requisitosTotal'];
 
     return Column(
       children: [
         Text(
-          _badgeMock['descricao'],
+          _badgeData!['descricao'],
           textAlign: TextAlign.center,
           style:
               const TextStyle(fontSize: 14, color: Colors.black54, height: 1.5),
@@ -258,21 +486,11 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Requisitos Necessários:",
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text(
-                    "$reqFeitos de $totalReq",
-                    style: const TextStyle(
-                        color: Color(0xFF0980E9), fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
+              const Text("Requisitos Necessários:",
+                  style:
+                      TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const Divider(height: 30),
-              ..._badgeMock['requisitos'].map((r) => Padding(
+              ..._badgeData!['requisitos'].map((r) => Padding(
                     padding: const EdgeInsets.only(bottom: 15),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,13 +509,14 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(r['id'],
+                              Text(r['titulo'] ?? '',
                                   style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       color: r['concluido']
                                           ? Colors.black87
                                           : Colors.grey)),
-                              Text(r['desc'],
+                              const SizedBox(height: 4),
+                              Text(r['desc'] ?? '',
                                   style: TextStyle(
                                       fontSize: 12,
                                       color: r['concluido']
@@ -317,15 +536,17 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
           width: double.infinity,
           height: 55,
           child: ElevatedButton(
-            // Redireciona para o formulário de candidatura
-            onPressed: () => context.push('/candidatura'),
+            onPressed: _badgeData!['obtido'] == true
+                ? null
+                : () => context.push('/candidatura', extra: {'idBadge': widget.idBadge}),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0980E9),
+              backgroundColor: _badgeData!['obtido'] == true ? Colors.grey.shade400 : const Color(0xFF0980E9),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text("Candidatar a este Badge",
-                style: TextStyle(
+            child: Text(
+                _badgeData!['obtido'] == true ? "Badge Já Obtido" : "Candidatar a este Badge",
+                style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.bold)),
@@ -337,26 +558,65 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
 
   // WIDGET 2: Botões de Ação (Modo Obtido Normal / Premium)
   Widget _construirAcoesBadgeObtido() {
+    // Verificar se expira em menos de 30 dias para mostrar o botão Renovar
+    bool precisaRenovar = false;
+    if (_modoAtual == ModoDetalheBadge.obtidoNormal && _badgeData!['dataExpiracao'] != null) {
+      try {
+        DateTime dataExp = DateTime.parse(_badgeData!['dataExpiracao']);
+        if (dataExp.difference(DateTime.now()).inDays <= 30) {
+          precisaRenovar = true;
+        }
+      } catch (e) {
+        // Ignora erros de parse e oculta o botão
+      }
+    }
+
+    final String urlPublica = "https://softinsa-plataforma.onrender.com/badge/${_badgeData!['linkUnico'] ?? ''}";
+
     return Column(
       children: [
+        if (precisaRenovar) ...[
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: ElevatedButton(
+              onPressed: _renovarBadge,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                elevation: 3,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.autorenew, color: Colors.white),
+                  SizedBox(width: 10),
+                  Text("Renovar (+30 dias)", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 15),
+        ],
+
         // BOTÃO LINKEDIN
         SizedBox(
           width: double.infinity,
           height: 55,
-          child: ElevatedButton.icon(
+          child: ElevatedButton(
             onPressed: _partilharLinkedIn,
-            icon: const Icon(Icons.share, color: Colors.white),
-            label: const Text("Partilhar no LinkedIn",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  const Color(0xFF0077b5), // Cor oficial do LinkedIn
+              backgroundColor: const Color(0xFF0077b5), // Cor oficial do LinkedIn
               elevation: 3,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.share, color: Colors.white),
+                SizedBox(width: 10),
+                Text("Partilhar no LinkedIn", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
             ),
           ),
         ),
@@ -365,50 +625,69 @@ class _BadgeDetalheViewState extends State<BadgeDetalheView> {
         // BOTÃO DOWNLOAD CERTIFICADO PDF
         SizedBox(
           width: double.infinity,
-          height: 55,
-          child: ElevatedButton.icon(
+          height: 65,
+          child: ElevatedButton(
             onPressed: _downloadCertificado,
-            icon: const Icon(Icons.picture_as_pdf, color: Color(0xFF34659D)),
-            label: const Text("Fazer Download do Certificado",
-                style: TextStyle(
-                    color: Color(0xFF34659D),
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
               elevation: 0,
               side: const BorderSide(color: Color(0xFF34659D), width: 1.5),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.picture_as_pdf, color: Color(0xFF34659D)),
+                SizedBox(width: 10),
+                Text("Fazer Download do\nCertificado", textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF34659D), fontSize: 15, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 15),
+        
+        // BOTÃO PARTILHAR EMAIL
+        SizedBox(
+          width: double.infinity,
+          height: 55,
+          child: ElevatedButton(
+            onPressed: _partilharEmail,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              side: const BorderSide(color: Color(0xFF34659D), width: 1.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Icon(Icons.email, color: Color(0xFF34659D)),
+                SizedBox(width: 10),
+                Text("Partilhar por Email", textAlign: TextAlign.center, style: TextStyle(color: Color(0xFF34659D), fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
             ),
           ),
         ),
 
-        const SizedBox(height: 25),
+        const SizedBox(height: 35),
 
         // Link Público do Badge
         const Text("Link de Verificação Público:",
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 5),
-        SelectableText(
-          _badgeMock['linkUnico'],
-          style: const TextStyle(
-              fontSize: 13,
-              color: Colors.blue,
-              decoration: TextDecoration.underline),
+            style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _abrirLinkPublico,
+          child: Text(
+            urlPublica,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF0980E9),
+                decoration: TextDecoration.underline),
+          ),
         )
       ],
-    );
-  }
-
-  // Widget auxiliar para os botões de teste no topo
-  Widget _btnTeste(String titulo, ModoDetalheBadge modo) {
-    return TextButton(
-      onPressed: () => setState(() => _modoAtual = modo),
-      child: Text(titulo,
-          style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: _modoAtual == modo ? Colors.red : Colors.black54)),
     );
   }
 }

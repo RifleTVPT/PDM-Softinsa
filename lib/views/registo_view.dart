@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import '../services/api_servico.dart';
+import 'package:flutter/gestures.dart';
+import 'package:http/http.dart' as http;
 
 class RegistoView extends StatefulWidget {
   const RegistoView({super.key});
@@ -51,41 +56,118 @@ class _RegistoViewState extends State<RegistoView> {
         temEspecial;
   }
 
-  void _validarEAvancar() {
+  bool _isLoading = false;
+
+  Future<void> _mostrarTermosRGPD() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final res = await http.get(Uri.parse('${ApiServico.baseUrl}/configuracoes/rgpd'));
+      if (mounted) Navigator.pop(context); // fechar loading
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body)['data'];
+        final termos = data['RGPD_TERMOS'] ?? 'Termos e condições não definidos.';
+        final politicas = data['RGPD_POLITICAS'] ?? 'Políticas de privacidade não definidas.';
+        
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (c) => AlertDialog(
+              title: const Text("Termos e Políticas"),
+              content: SingleChildScrollView(
+                child: Text("--- TERMOS E CONDIÇÕES ---\n\n$termos\n\n\n--- POLÍTICAS RGPD ---\n\n$politicas"),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(c),
+                  child: const Text("Fechar"),
+                )
+              ],
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao carregar políticas.')));
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context); // fechar loading
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sem ligação. Não foi possível carregar as políticas.')));
+      }
+    }
+  }
+
+  void _validarEAvancar() async {
     setState(() {
       _mensagemErro = "";
-      if (_etapaAtual == 1) {
-        if (_nomeInput.text.isEmpty ||
-            _emailInput.text.isEmpty ||
-            _senhaInput.text.isEmpty ||
-            _confirmarSenhaInput.text.isEmpty) {
-          _mensagemErro = "Por favor, preencha todos os dados.";
-          return;
-        }
-        if (!_emailEhValido(_emailInput.text)) {
-          _mensagemErro = "Introduza um email profissional válido.";
-          return;
-        }
-        if (!_senhaEhForte(_senhaInput.text)) {
-          _mensagemErro =
-              "A password deve ter 8 caracteres, maiúsculas, números e um caracter especial.";
-          return;
-        }
-        if (_senhaInput.text != _confirmarSenhaInput.text) {
-          _mensagemErro = "As passwords não coincidem!";
-          return;
-        }
-        _etapaAtual = 2;
-      } else if (_etapaAtual == 2) {
-        if (_servicoEscolhido == null ||
-            _areaEscolhida == null ||
-            !_aceitouTermos) {
-          _mensagemErro = "Selecione as áreas e aceite os termos.";
-          return;
-        }
-        _etapaAtual = 3;
-      }
     });
+
+    if (_etapaAtual == 1) {
+      if (_nomeInput.text.isEmpty ||
+          _emailInput.text.isEmpty ||
+          _senhaInput.text.isEmpty ||
+          _confirmarSenhaInput.text.isEmpty) {
+        setState(() => _mensagemErro = "Por favor, preencha todos os dados.");
+        return;
+      }
+      if (!_emailEhValido(_emailInput.text)) {
+        setState(() => _mensagemErro = "Introduza um email profissional válido.");
+        return;
+      }
+      if (!_senhaEhForte(_senhaInput.text)) {
+        setState(() => _mensagemErro =
+            "A password deve ter 8 caracteres, maiúsculas, números e um caracter especial.");
+        return;
+      }
+      if (_senhaInput.text != _confirmarSenhaInput.text) {
+        setState(() => _mensagemErro = "As passwords não coincidem!");
+        return;
+      }
+      setState(() => _etapaAtual = 2);
+    } else if (_etapaAtual == 2) {
+      if (_servicoEscolhido == null ||
+          _areaEscolhida == null ||
+          !_aceitouTermos) {
+        setState(() => _mensagemErro = "Selecione as áreas e aceite os termos.");
+        return;
+      }
+
+      setState(() => _isLoading = true);
+
+      // Encriptação da Password para envio
+      var bytes = utf8.encode(_senhaInput.text);
+      var digest = sha256.convert(bytes);
+      String passwordEncriptada = digest.toString();
+
+      // Montar Payload
+      Map<String, dynamic> payload = {
+        "nome": _nomeInput.text.trim(),
+        "email": _emailInput.text.trim(),
+        "password": passwordEncriptada,
+        "perfil": "Consultor", // Na app mobile é forçosamente Consultor
+        "serviceLine": _servicoEscolhido,
+        "area": _areaEscolhida
+      };
+
+      // Chamada à API
+      final res = await ApiServico().registar(payload);
+
+      setState(() {
+        _isLoading = false;
+        if (res.containsKey('error') || (res['success'] == false && !res.containsKey('message'))) {
+          _mensagemErro = res['error'] ?? res['message'] ?? "Erro ao registar conta.";
+        } else {
+          _etapaAtual = 3;
+        }
+      });
+    }
   }
 
   @override
@@ -254,17 +336,22 @@ class _RegistoViewState extends State<RegistoView> {
                   color: _azulSoftinsa,
                   size: 30),
               const SizedBox(width: 10),
-              const Expanded(
-                child: Text.rich(
-                  TextSpan(text: "Eu aceito os ", children: [
-                    TextSpan(
-                        text: "Termos e Condições",
-                        style: TextStyle(
-                            color: Colors.blue,
-                            decoration: TextDecoration.underline)),
-                    TextSpan(text: " desta App"),
-                  ]),
-                  style: TextStyle(fontSize: 15),
+              Expanded(
+                child: RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 15, color: Colors.black87),
+                    children: [
+                      const TextSpan(text: "Eu aceito os "),
+                      TextSpan(
+                          text: "Termos e Condições",
+                          style: const TextStyle(
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline),
+                          recognizer: TapGestureRecognizer()..onTap = _mostrarTermosRGPD,
+                      ),
+                      const TextSpan(text: " desta App"),
+                    ]
+                  ),
                 ),
               ),
             ],
@@ -345,17 +432,19 @@ class _RegistoViewState extends State<RegistoView> {
       width: double.infinity,
       height: 55,
       child: ElevatedButton(
-        onPressed: acao,
+        onPressed: _isLoading ? null : acao,
         style: ElevatedButton.styleFrom(
             backgroundColor: _azulBotao,
             elevation: 4,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10))),
-        child: Text(texto,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold)),
+        child: _isLoading
+            ? const CircularProgressIndicator(color: Colors.white)
+            : Text(texto,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
       ),
     );
   }
