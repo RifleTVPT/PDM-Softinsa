@@ -15,6 +15,11 @@ import '../views/perfil_view.dart';
 import '../views/notificacoes_view.dart';
 import '../views/badge_detalhe_view.dart';
 import '../views/pedido_status_view.dart';
+import '../views/meus_badges_detalhe_view.dart';
+import '../views/conquistas_detalhe_view.dart';
+import '../views/timeline_objetivos_view.dart';
+import '../views/ranking_pontos_view.dart';
+import '../views/primeiro_acesso_view.dart';
 
 // Agora é uma função que recebe a rota inicial para a parte do login só ser feito na 1 vez (e verificar se o utilizador está logado)
 GoRouter criarRouter(String rotaInicial) {
@@ -44,7 +49,10 @@ GoRouter criarRouter(String rotaInicial) {
       GoRoute(
           name: 'candidatura',
           path: '/candidatura',
-          builder: (context, state) => const CandidaturaView()),
+          builder: (context, state) {
+            final args = state.extra as Map<String, dynamic>? ?? {};
+            return CandidaturaView(idBadge: args['idBadge']);
+          }),
       GoRoute(
           name: 'meus_badges',
           path: '/meus_badges',
@@ -80,11 +88,49 @@ GoRouter criarRouter(String rotaInicial) {
       GoRoute(
           name: 'badge_detalhe',
           path: '/badge_detalhe',
-          builder: (context, state) => const BadgeDetalheView()),
+          builder: (context, state) {
+            final args = state.extra as Map<String, dynamic>? ?? {};
+            return BadgeDetalheView(idBadge: args['idBadge'] ?? 1, from: args['from']); // 1 como fallback
+          }),
       GoRoute(
           name: 'pedido_status',
           path: '/pedido_status',
-          builder: (context, state) => const PedidoStatusView()),
+          builder: (context, state) {
+            final args = state.extra as Map<String, dynamic>? ?? {};
+            return PedidoStatusView(idPedido: args['idPedido'] ?? 1);
+          }),
+      GoRoute(
+          name: 'meus_badges_detalhe',
+          path: '/meus_badges_detalhe',
+          builder: (context, state) {
+            final args = state.extra as Map<String, dynamic>? ?? {};
+            return MeusBadgesDetalheView(
+              idBadge: args['idBadge'] ?? 1,
+              idConsultor: args['idConsultor'] ?? 1,
+            );
+          }),
+      GoRoute(
+          name: 'conquistas_detalhe',
+          path: '/conquistas_detalhe',
+          builder: (context, state) {
+            final args = state.extra as Map<String, dynamic>? ?? {};
+            return ConquistasDetalheView(
+              idMarco: args['idMarco'] ?? 1,
+              isObtido: args['isObtido'] ?? false,
+            );
+          }),
+      GoRoute(
+          name: 'objetivos',
+          path: '/objetivos',
+          builder: (context, state) => const TimelineObjetivosView()),
+      GoRoute(
+          name: 'ranking',
+          path: '/ranking',
+          builder: (context, state) => const RankingPontosView()),
+      GoRoute(
+          name: 'primeiro_acesso',
+          path: '/primeiro_acesso',
+          builder: (context, state) => const PrimeiroAcessoView()),
     ],
   );
 }

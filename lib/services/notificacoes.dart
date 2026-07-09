@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../database/bd_local_ajudante.dart';
 import '../models/notificacao_model.dart';
+import 'sincronizador.dart';
+import 'api_servico.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -18,6 +20,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     );
     await BDLocalAjudante().inserir('NOTIFICACAO', novaNotif.toMap());
   }
+  // Também sincroniza nas mensagens apenas com dados, usadas para atualizar a cache.
+  await Sincronizador().sincronizarDadosIniciais();
 }
 
 class Notificacoes {
@@ -42,11 +46,11 @@ class Notificacoes {
       sound: true,
     );
 
-    // Obter e imprimir a KEY (FCM Token) bem visível no terminal!
     String? token = await _firebaseMessaging.getToken();
-    print("\n=======================================================");
-    print("A MINHA KEY (FCM TOKEN) É:\n$token");
-    print("=======================================================\n");
+    if (token != null) await ApiServico().registarFcmToken(token);
+    _firebaseMessaging.onTokenRefresh.listen(
+      (novoToken) => ApiServico().registarFcmToken(novoToken),
+    );
 
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -97,6 +101,9 @@ class Notificacoes {
         // Mostra o Popup Modal no meio do ecrã
         _mostrarPopup(
             notification.title ?? 'Nova Notificação', notification.body ?? '');
+
+        // Regra de PDM: Sincronização offline-first disparada por Push Notification
+        await Sincronizador().sincronizarDadosIniciais();
       }
     });
   }
