@@ -5,6 +5,7 @@ import 'dart:async';
 import '../services/api_servico.dart';
 import '../services/conectividade_servico.dart';
 import '../services/sincronizador.dart';
+import 'avatar_utilizador_mobile.dart';
 
 class LayoutConsultor extends StatefulWidget {
   final Widget corpo;
@@ -116,13 +117,12 @@ class _LayoutConsultorState extends State<LayoutConsultor> {
             onTap: () => context.push('/perfil'),
             child: Padding(
               padding: const EdgeInsets.only(right: 12.0),
-              child: CircleAvatar(
-                radius: 16,
+              child: AvatarUtilizadorMobile(
+                nome: _nomeCompleto,
+                foto: _avatarUrl,
+                raio: 16,
                 backgroundColor: Colors.white24,
-                backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-                child: _avatarUrl.isEmpty
-                    ? Text(_obterIniciais(_nomeCompleto), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
-                    : null,
+                foregroundColor: Colors.white,
               ),
             ),
           ),
@@ -133,12 +133,12 @@ class _LayoutConsultorState extends State<LayoutConsultor> {
           children: [
             UserAccountsDrawerHeader(
               decoration: const BoxDecoration(color: Color(0xFF34659D)),
-              currentAccountPicture: CircleAvatar(
-                  backgroundColor: Colors.white,
-                  backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-                  child: _avatarUrl.isEmpty
-                      ? Text(_obterIniciais(_nomeCompleto), style: const TextStyle(color: Color(0xFF34659D), fontWeight: FontWeight.bold, fontSize: 20))
-                      : null,
+              currentAccountPicture: AvatarUtilizadorMobile(
+                nome: _nomeCompleto,
+                foto: _avatarUrl,
+                raio: 36,
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF34659D),
               ),
               accountName: Text(_nomeCompleto,
                   style: const TextStyle(fontWeight: FontWeight.bold)),
