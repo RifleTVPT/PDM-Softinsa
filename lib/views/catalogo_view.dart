@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
+import '../components/imagem_badge_mobile.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/conectividade_servico.dart';
+import '../services/sincronizador.dart';
 
 class CatalogoView extends StatefulWidget {
   const CatalogoView({super.key});
@@ -21,6 +25,8 @@ class _CatalogoViewState extends State<CatalogoView> {
   List<String> _todasAreas = ["Todas as Áreas"];
   final List<String> _niveisSelecionados = [];
   List<String> _todosNiveis = [];
+  String? _minhaServiceLine;
+  String? _minhaArea;
 
   // Dados Dinâmicos
   List<Map<String, dynamic>> _badgesRecomendados = [];
@@ -35,18 +41,25 @@ class _CatalogoViewState extends State<CatalogoView> {
   Future<void> _carregarCatalogo() async {
     try {
       final dbHelper = BDLocalAjudante();
-      final users = await dbHelper.listar('UTILIZADOR');
-      int userId = 1; // Fallback
-      if (users.isNotEmpty) {
-        userId = users.first['ID_UTILIZADOR'] as int;
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('idUtilizador');
+      if (userId == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+      if (await ConectividadeServico().temInternet()) {
+        await Sincronizador().sincronizarDadosIniciais();
       }
 
       Map<String, dynamic> dados = await dbHelper.obterCatalogo(userId);
 
       setState(() {
         _todosBadges = List<Map<String, dynamic>>.from(dados['todos']);
-        _badgesRecomendados = List<Map<String, dynamic>>.from(dados['recomendados']);
-        
+        _badgesRecomendados =
+            List<Map<String, dynamic>>.from(dados['recomendados']);
+        _minhaServiceLine = dados['minhaServiceLine']?.toString();
+        _minhaArea = dados['minhaArea']?.toString();
+
         // Mapear icones dinamicamente para não alterar o design da UI
         for (var b in _todosBadges) {
           b['icone'] = _obterIconePorArea(b['sl']);
@@ -55,9 +68,13 @@ class _CatalogoViewState extends State<CatalogoView> {
           b['icone'] = _obterIconePorArea(b['sl']);
         }
         // Extrair SLs, Areas e Niveis disponiveis
-        _todasServiceLines = ["Todas as Service Lines", ..._todosBadges.map((e) => e['sl'].toString()).toSet().toList()..sort()];
+        _todasServiceLines = [
+          "Todas as Service Lines",
+          ..._todosBadges.map((e) => e['sl'].toString()).toSet().toList()
+            ..sort()
+        ];
         _atualizarAreasPorSL("Todas as Service Lines");
-        
+
         _isLoading = false;
       });
     } catch (e) {
@@ -70,9 +87,18 @@ class _CatalogoViewState extends State<CatalogoView> {
     _servicoEscolhido = sl;
     _areaEscolhida = "Todas as Áreas";
     if (sl == "Todas as Service Lines") {
-      _todasAreas = ["Todas as Áreas", ..._todosBadges.map((e) => e['area'].toString()).toSet()];
+      _todasAreas = [
+        "Todas as Áreas",
+        ..._todosBadges.map((e) => e['area'].toString()).toSet()
+      ];
     } else {
-      _todasAreas = ["Todas as Áreas", ..._todosBadges.where((e) => e['sl'] == sl).map((e) => e['area'].toString()).toSet()];
+      _todasAreas = [
+        "Todas as Áreas",
+        ..._todosBadges
+            .where((e) => e['sl'] == sl)
+            .map((e) => e['area'].toString())
+            .toSet()
+      ];
     }
     _atualizarNiveis();
   }
@@ -99,31 +125,18 @@ class _CatalogoViewState extends State<CatalogoView> {
     return Icons.auto_awesome; // Default (Hybrid Cloud, etc)
   }
 
-  Widget _construirImagemBadge(String? urlImagem, IconData iconeFallback, double raio) {
-    if (urlImagem != null && urlImagem.isNotEmpty) {
-      // Assuming network URL for now, could be local asset if no network but this mimics Web
-      if (urlImagem.startsWith('http')) {
-        return CircleAvatar(
-          backgroundColor: const Color(0xFFF4F5F9),
-          radius: raio,
-          backgroundImage: NetworkImage(urlImagem),
-          onBackgroundImageError: (_, __) {},
-          child: null,
-        );
-      } else {
-        return CircleAvatar(
-          backgroundColor: const Color(0xFFF4F5F9),
-          radius: raio,
-          backgroundImage: AssetImage('assets/images/$urlImagem'),
-          onBackgroundImageError: (_, __) {},
-        );
-      }
-    }
-    
+  Widget _construirImagemBadge(
+      String? urlImagem, IconData iconeFallback, double raio) {
     return CircleAvatar(
       backgroundColor: const Color(0xFFF4F5F9),
       radius: raio,
-      child: Icon(iconeFallback, color: const Color(0xFF34659D), size: raio),
+      child: ClipOval(
+        child: ImagemBadgeMobile(
+          urlImagem: urlImagem,
+          tamanho: raio * 2,
+          padding: const EdgeInsets.all(4),
+        ),
+      ),
     );
   }
 
@@ -141,6 +154,27 @@ class _CatalogoViewState extends State<CatalogoView> {
     });
   }
 
+  String _textoServiceLine(String sl) {
+    if (_minhaServiceLine != null && sl == _minhaServiceLine) {
+      return "$sl (minha)";
+    }
+    return sl;
+  }
+
+  String _textoArea(String area) {
+    if (_minhaArea != null && area == _minhaArea) {
+      return "$area (minha)";
+    }
+    return area;
+  }
+
+  String _textoNivel(Map<String, dynamic> badge) {
+    final letra = badge['nivel']?.toString() ?? '';
+    final nome = badge['nomeNivel']?.toString() ?? 'Nível $letra';
+    if (nome.contains('(')) return nome;
+    return "$nome ($letra)";
+  }
+
   // Lógica de filtragem combinada
   List<Map<String, dynamic>> _obterBadgesFiltrados() {
     return _todosBadges.where((badge) {
@@ -153,8 +187,8 @@ class _CatalogoViewState extends State<CatalogoView> {
       bool slMatch = _servicoEscolhido == "Todas as Service Lines" ||
           badge["sl"] == _servicoEscolhido;
 
-      bool areaMatch = _areaEscolhida == "Todas as Áreas" ||
-          badge["area"] == _areaEscolhida;
+      bool areaMatch =
+          _areaEscolhida == "Todas as Áreas" || badge["area"] == _areaEscolhida;
 
       bool nivelMatch = _niveisSelecionados.isEmpty ||
           _niveisSelecionados.contains(badge["nivel"]);
@@ -168,7 +202,8 @@ class _CatalogoViewState extends State<CatalogoView> {
     if (_isLoading) {
       return LayoutConsultor(
         indexMenuInferior: 1,
-        corpo: const Center(child: CircularProgressIndicator(color: Color(0xFF34659D))),
+        corpo: const Center(
+            child: CircularProgressIndicator(color: Color(0xFF34659D))),
       );
     }
 
@@ -247,9 +282,14 @@ class _CatalogoViewState extends State<CatalogoView> {
                           itemBuilder: (context, index) {
                             var rec = _badgesRecomendados[index];
                             return GestureDetector(
-                              onTap: () => context.push('/badge_detalhe', extra: {'idBadge': rec['id'], 'from': 'catalogo'}),
+                              onTap: () => context.push('/badge_detalhe',
+                                  extra: {
+                                    'idBadge': rec['id'],
+                                    'from': 'catalogo'
+                                  }),
                               child: Container(
                                 width: 220, // Largura de cada card
+                                height: 190,
                                 margin: const EdgeInsets.only(right: 15),
                                 padding: const EdgeInsets.all(15),
                                 decoration: BoxDecoration(
@@ -264,11 +304,11 @@ class _CatalogoViewState extends State<CatalogoView> {
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Row(
                                       children: [
-                                        _construirImagemBadge(rec['urlImagem'], rec['icone'], 20),
+                                        _construirImagemBadge(
+                                            rec['urlImagem'], rec['icone'], 20),
                                         const Spacer(),
                                         const Icon(
                                             Icons.arrow_forward_ios_rounded,
@@ -276,7 +316,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                                             color: Colors.grey),
                                       ],
                                     ),
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 8),
                                     Text(
                                       rec['titulo'],
                                       maxLines: 2,
@@ -286,19 +326,20 @@ class _CatalogoViewState extends State<CatalogoView> {
                                           fontSize: 13,
                                           color: Color(0xFF1A1A1A)),
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 3),
                                     Text(
                                       rec['sl'],
-                                      maxLines: 2,
+                                      maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                           fontSize: 13,
-                                          color: Color(0xFF34659D), // Azul Softinsa
+                                          color: Color(
+                                              0xFF34659D), // Azul Softinsa
                                           fontWeight: FontWeight.bold),
                                     ),
-                                    const SizedBox(height: 4),
+                                    const SizedBox(height: 3),
                                     Text(
-                                      "${rec['area']} - ${rec['nivel']}",
+                                      "${rec['area']} - ${_textoNivel(rec)}",
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
@@ -309,6 +350,8 @@ class _CatalogoViewState extends State<CatalogoView> {
                                     const Spacer(),
                                     Text(
                                       "${rec['pontos']} Pontos",
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.bold,
@@ -385,8 +428,9 @@ class _CatalogoViewState extends State<CatalogoView> {
                             icon: const Icon(Icons.keyboard_arrow_down,
                                 color: Color(0xFF34659D)),
                             items: _todasServiceLines
-                                .map((s) =>
-                                    DropdownMenuItem(value: s, child: Text(s)))
+                                .map((s) => DropdownMenuItem(
+                                    value: s,
+                                    child: Text(_textoServiceLine(s))))
                                 .toList(),
                             onChanged: (v) {
                               setState(() {
@@ -412,14 +456,14 @@ class _CatalogoViewState extends State<CatalogoView> {
                             icon: const Icon(Icons.keyboard_arrow_down,
                                 color: Color(0xFF34659D)),
                             items: _todasAreas
-                                .map((a) =>
-                                    DropdownMenuItem(value: a, child: Text(a)))
+                                .map((a) => DropdownMenuItem(
+                                    value: a, child: Text(_textoArea(a))))
                                 .toList(),
                             onChanged: (v) {
-                                setState(() {
-                                  _areaEscolhida = v!;
-                                  _atualizarNiveis();
-                                });
+                              setState(() {
+                                _areaEscolhida = v!;
+                                _atualizarNiveis();
+                              });
                             },
                           ),
                         ),
@@ -442,38 +486,39 @@ class _CatalogoViewState extends State<CatalogoView> {
                               onTap: () => _alternarNivel(n),
                               child: Container(
                                 margin: const EdgeInsets.only(right: 15),
-                              width: 45,
-                              height: 45,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: sel
-                                    ? const Color(0xFF34659D)
-                                    : Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: sel
-                                        ? const Color(0xFF34659D)
-                                        : Colors.grey.shade300,
-                                    width: 1.5),
-                                boxShadow: sel
-                                    ? [
-                                        BoxShadow(
-                                            color: Colors.blue.withOpacity(0.2),
-                                            blurRadius: 8)
-                                      ]
-                                    : null,
-                              ),
-                              child: Text(n,
-                                  style: TextStyle(
+                                width: 45,
+                                height: 45,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: sel
+                                      ? const Color(0xFF34659D)
+                                      : Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
                                       color: sel
-                                          ? Colors.white
-                                          : const Color(0xFF34659D),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16)),
-                            ),
-                          );
-                        }).toList(),
-                      ),
+                                          ? const Color(0xFF34659D)
+                                          : Colors.grey.shade300,
+                                      width: 1.5),
+                                  boxShadow: sel
+                                      ? [
+                                          BoxShadow(
+                                              color:
+                                                  Colors.blue.withOpacity(0.2),
+                                              blurRadius: 8)
+                                        ]
+                                      : null,
+                                ),
+                                child: Text(n,
+                                    style: TextStyle(
+                                        color: sel
+                                            ? Colors.white
+                                            : const Color(0xFF34659D),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16)),
+                              ),
+                            );
+                          }).toList(),
+                        ),
                       ),
 
                       const SizedBox(height: 35),
@@ -520,7 +565,10 @@ class _CatalogoViewState extends State<CatalogoView> {
                             var badge = badgesVisiveis[index];
                             return GestureDetector(
                               onTap: () {
-                                context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                                context.push('/badge_detalhe', extra: {
+                                  'idBadge': badge['id'],
+                                  'from': 'catalogo'
+                                });
                               },
                               child: Container(
                                 margin: const EdgeInsets.only(bottom: 20),
@@ -542,12 +590,17 @@ class _CatalogoViewState extends State<CatalogoView> {
                                       padding: const EdgeInsets.all(4),
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: const Color(0xFF4C51F7), width: 2), // Azul estilo Web
+                                        border: Border.all(
+                                            color: const Color(0xFF4C51F7),
+                                            width: 2), // Azul estilo Web
                                       ),
-                                      child: _construirImagemBadge(badge['urlImagem'], badge['icone'], 35),
+                                      child: _construirImagemBadge(
+                                          badge['urlImagem'],
+                                          badge['icone'],
+                                          35),
                                     ),
                                     const SizedBox(height: 15),
-                                    
+
                                     // Título
                                     Text(
                                       badge['titulo'],
@@ -558,7 +611,7 @@ class _CatalogoViewState extends State<CatalogoView> {
                                           color: Color(0xFF1A1A1A)),
                                     ),
                                     const SizedBox(height: 8),
-                                    
+
                                     // Service Line
                                     Text(
                                       "Service Line ${badge['sl']}",
@@ -569,10 +622,19 @@ class _CatalogoViewState extends State<CatalogoView> {
                                           color: Color(0xFF4C51F7)),
                                     ),
                                     const SizedBox(height: 4),
-                                    
+
                                     // Área e Nível
                                     Text(
-                                      "Área de ${badge['area']} - Nível ${badge['nivel']}",
+                                      "Área de ${badge['area']}",
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF555555)),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _textoNivel(badge),
                                       textAlign: TextAlign.center,
                                       style: const TextStyle(
                                           fontSize: 12,
@@ -580,44 +642,69 @@ class _CatalogoViewState extends State<CatalogoView> {
                                           color: Color(0xFF555555)),
                                     ),
                                     const SizedBox(height: 15),
-                                    
+
                                     // Caixas de Requisitos e Pontos
                                     Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 15, vertical: 8),
                                           decoration: BoxDecoration(
                                             color: const Color(0xFFF8F9FA),
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                           ),
                                           child: Column(
                                             children: [
-                                              const Text("Requisitos", style: TextStyle(fontSize: 10, color: Colors.black54)),
+                                              const Text("Requisitos",
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.black54)),
                                               const SizedBox(height: 2),
-                                              Text("${badge['numeroRequisitos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black)),
+                                              Text(
+                                                  "${badge['numeroRequisitos']}",
+                                                  style: const TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.black)),
                                             ],
                                           ),
                                         ),
                                         const SizedBox(width: 15),
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 15, vertical: 8),
                                           decoration: BoxDecoration(
                                             color: const Color(0xFFEEF0FF),
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
                                           ),
                                           child: Column(
                                             children: [
-                                              const Text("Pontos", style: TextStyle(fontSize: 10, color: Color(0xFF4C51F7), fontWeight: FontWeight.bold)),
+                                              const Text("Pontos",
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: Color(0xFF4C51F7),
+                                                      fontWeight:
+                                                          FontWeight.bold)),
                                               const SizedBox(height: 2),
-                                              Text("${badge['pontos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF4C51F7))),
+                                              Text("${badge['pontos']}",
+                                                  style: const TextStyle(
+                                                      fontSize: 14,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color:
+                                                          Color(0xFF4C51F7))),
                                             ],
                                           ),
                                         ),
                                       ],
                                     ),
                                     const SizedBox(height: 20),
-                                    
+
                                     // Botões
                                     SizedBox(
                                       width: double.infinity,
@@ -629,36 +716,67 @@ class _CatalogoViewState extends State<CatalogoView> {
                                               context: context,
                                               builder: (BuildContext context) {
                                                 return AlertDialog(
-                                                  title: const Text("Já obteve este Badge"),
-                                                  content: const Text("Este badge já faz parte do seu perfil."),
+                                                  title: const Text(
+                                                      "Já obteve este Badge"),
+                                                  content: const Text(
+                                                      "Este badge já faz parte do seu perfil."),
                                                   actions: [
                                                     TextButton(
                                                       onPressed: () {
-                                                        Navigator.of(context).pop(); // Close dialog
+                                                        Navigator.of(context)
+                                                            .pop(); // Close dialog
                                                       },
-                                                      child: const Text("Voltar", style: TextStyle(color: Colors.grey)),
+                                                      child: const Text(
+                                                          "Voltar",
+                                                          style: TextStyle(
+                                                              color:
+                                                                  Colors.grey)),
                                                     ),
                                                     TextButton(
                                                       onPressed: () {
-                                                        Navigator.of(context).pop(); // Close dialog
-                                                        context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                                                        Navigator.of(context)
+                                                            .pop(); // Close dialog
+                                                        context.push(
+                                                            '/badge_detalhe',
+                                                            extra: {
+                                                              'idBadge':
+                                                                  badge['id'],
+                                                              'from': 'catalogo'
+                                                            });
                                                       },
-                                                      child: const Text("Ver Registo de Obtenção", style: TextStyle(color: Color(0xFF0980E9), fontWeight: FontWeight.bold)),
+                                                      child: const Text(
+                                                          "Ver Registo de Obtenção",
+                                                          style: TextStyle(
+                                                              color: Color(
+                                                                  0xFF0980E9),
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold)),
                                                     ),
                                                   ],
                                                 );
                                               },
                                             );
                                           } else {
-                                            context.push('/candidatura', extra: {'idBadgeSelecionado': badge['id']});
+                                            context
+                                                .push('/candidatura', extra: {
+                                              'idBadgeSelecionado': badge['id']
+                                            });
                                           }
                                         },
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFF4C51F7),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                                          backgroundColor:
+                                              const Color(0xFF4C51F7),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(25)),
                                           elevation: 0,
                                         ),
-                                        child: const Text("+ Candidatar-me", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                                        child: const Text("+ Candidatar-me",
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: Colors.white)),
                                       ),
                                     ),
                                     const SizedBox(height: 10),
@@ -667,13 +785,24 @@ class _CatalogoViewState extends State<CatalogoView> {
                                       height: 45,
                                       child: OutlinedButton(
                                         onPressed: () {
-                                          context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'catalogo'});
+                                          context.push('/badge_detalhe',
+                                              extra: {
+                                                'idBadge': badge['id'],
+                                                'from': 'catalogo'
+                                              });
                                         },
                                         style: OutlinedButton.styleFrom(
-                                          side: const BorderSide(color: Colors.black45),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                                          side: const BorderSide(
+                                              color: Colors.black45),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(25)),
                                         ),
-                                        child: const Text("Ver Detalhes", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
+                                        child: const Text("Ver Detalhes",
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                                color: Colors.black54)),
                                       ),
                                     ),
                                   ],

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
 import '../services/api_servico.dart';
+import '../components/imagem_badge_mobile.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class PedidoStatusView extends StatefulWidget {
   final int idPedido;
@@ -24,15 +26,19 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
   String _formatarNomeRequisito(String? tituloDB, String nivelStr) {
     if (tituloDB == null || tituloDB.isEmpty) return 'Não mapeado';
     if (!tituloDB.toLowerCase().startsWith('requisito ')) return tituloDB;
-    
+
     String letra = '';
     String n = nivelStr.toLowerCase().trim();
-    if (n == 'júnior' || n == 'junior') letra = 'A';
-    else if (n == 'pleno') letra = 'B';
-    else if (n == 'sênior' || n == 'senior') letra = 'C';
-    else if (n == 'especialista') letra = 'D';
+    if (n == 'júnior' || n == 'junior')
+      letra = 'A';
+    else if (n == 'pleno')
+      letra = 'B';
+    else if (n == 'sênior' || n == 'senior')
+      letra = 'C';
+    else if (n == 'especialista')
+      letra = 'D';
     else if (n == 'principal') letra = 'E';
-    
+
     String numStr = tituloDB.substring(10).trim();
     if (numStr.isNotEmpty && RegExp(r'^[A-Za-z]').hasMatch(numStr)) {
       return tituloDB; // Já está formatado
@@ -40,28 +46,57 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
     return 'Requisito $letra$numStr';
   }
 
+  Widget _infoBadgeCurta(String titulo, String valor,
+      {CrossAxisAlignment alinhamento = CrossAxisAlignment.start,
+      TextAlign textAlign = TextAlign.start}) {
+    return Column(
+      crossAxisAlignment: alinhamento,
+      children: [
+        Text(titulo, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        Text(
+          valor,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: textAlign,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        ),
+      ],
+    );
+  }
+
   Future<void> _carregarPedido() async {
     try {
       // 1. Carregar BASE LOCAL primeiro
-      final dadosLocal = await BDLocalAjudante().obterPedidoDetalhe(widget.idPedido);
+      final dadosLocal =
+          await BDLocalAjudante().obterPedidoDetalhe(widget.idPedido);
       if (!mounted) return;
-      
+
       if (dadosLocal == null) {
         setState(() => _isLoading = false);
         return;
       }
 
       String statusInicial = dadosLocal['ESTADO_PEDIDO'] ?? 'Pendente';
-      
+
       // 2. Histórico offline
       List<Map<String, dynamic>> historicoLocal = [];
       if (statusInicial == 'Rascunho') {
         historicoLocal = [
-          {"passo": "Rascunho criado", "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']), "status": "info", "subtitulo": "Consultor"},
+          {
+            "passo": "Rascunho criado",
+            "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']),
+            "status": "info",
+            "subtitulo": "Consultor"
+          },
         ];
       } else {
         historicoLocal = [
-          {"passo": "Pedido submetido", "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']), "status": "success", "subtitulo": "Consultor"},
+          {
+            "passo": "Pedido submetido",
+            "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']),
+            "status": "success",
+            "subtitulo": "Consultor"
+          },
         ];
       }
 
@@ -73,36 +108,45 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
         "comentario": dadosLocal['COMENTARIO_CONSULTOR'],
         "historico": historicoLocal,
         "ficheiros": (dadosLocal['evidencias'] as List?)?.map((e) {
-          String reqNome = _formatarNomeRequisito(e['TITULO_REQUISITO'], dadosLocal['NOME_NIVEL'] ?? '');
-          return {
-            "nome": e['NOME_FICHEIRO'] ?? 'Documento',
-            "ficheiro": e['URL_FICHEIRO'] ?? '',
-            "requisito": reqNome
-          };
-        }).toList() ?? [],
+              String reqNome = _formatarNomeRequisito(
+                  e['TITULO_REQUISITO'], dadosLocal['NOME_NIVEL'] ?? '');
+              return {
+                "nome": e['NOME_FICHEIRO'] ?? 'Documento',
+                "ficheiro": e['URL_FICHEIRO'] ?? '',
+                "requisito": reqNome
+              };
+            }).toList() ??
+            [],
         "sl": dadosLocal['SERVICE_LINE'] ?? 'N/A',
         "area": dadosLocal['NOME_AREA'] ?? 'N/A',
         "nivel": dadosLocal['NOME_NIVEL'] ?? 'N/A',
         "validade": dadosLocal['VALIDADE_MESES'],
         "pontos": dadosLocal['PONTOS_BADGE'] ?? 0,
         "id_badge": dadosLocal['ID_BADGE'],
+        "urlImagem": dadosLocal['URL_IMAGEM'],
       };
 
       // 4. Buscar API para enriquecer
-      if (dadosLocal['IS_SINCRONIZADO'] == 1 && statusInicial != 'Rascunho') {
+      if (dadosLocal['IS_SINCRONIZADO'] == 1) {
         try {
-          final dadosApi = await ApiServico().obterDetalhesPedidoApi(widget.idPedido);
+          final dadosApi =
+              await ApiServico().obterDetalhesPedidoApi(widget.idPedido);
           if (dadosApi != null) {
-            
             if (dadosApi['status'] != null) {
-              pedidoMontado['status'] = dadosApi['status'] == 'Pendente' ? 'Rascunho' : dadosApi['status'];
+              pedidoMontado['status'] = dadosApi['status'];
             }
-            if (dadosApi['ultimoEstado'] != null) pedidoMontado['dataAtualizacao'] = dadosApi['ultimoEstado'];
-            
+            if (dadosApi['ultimoEstado'] != null)
+              pedidoMontado['dataAtualizacao'] = dadosApi['ultimoEstado'];
+
             var timelineApi = dadosApi['timeline'] as List? ?? [];
             if (timelineApi.isNotEmpty) {
               List<Map<String, dynamic>> histFormatado = [
-                {"passo": "Pedido submetido", "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']), "status": "success", "subtitulo": "Consultor"},
+                {
+                  "passo": "Pedido submetido",
+                  "data": _formatarData(dadosLocal['DATA_SUBMISSAO_PEDIDO']),
+                  "status": "success",
+                  "subtitulo": "Consultor"
+                },
               ];
               for (var h in timelineApi) {
                 histFormatado.add({
@@ -119,17 +163,23 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
             if (evidenciasApi.isNotEmpty) {
               pedidoMontado['ficheiros'] = evidenciasApi.map((e) {
                 String req = e['req'] ?? 'Não mapeado';
-                
+
                 // Fallback: se a API vier desatualizada ("Não mapeado" ou "Requisito 1"), tentamos obter da base local
-                if (req == 'Não mapeado' || req.toLowerCase().startsWith('requisito ')) {
-                  var fichLocal = (dadosLocal['evidencias'] as List?)?.firstWhere(
-                    (f) => f['URL_FICHEIRO'] == e['url'] || f['URL_FICHEIRO'] == e['ficheiro'],
-                    orElse: () => null
-                  );
-                  if (fichLocal != null && fichLocal['TITULO_REQUISITO'] != null) {
-                    req = _formatarNomeRequisito(fichLocal['TITULO_REQUISITO'], dadosLocal['NOME_NIVEL'] ?? '');
+                if (req == 'Não mapeado' ||
+                    req.toLowerCase().startsWith('requisito ')) {
+                  var fichLocal = (dadosLocal['evidencias'] as List?)
+                      ?.firstWhere(
+                          (f) =>
+                              f['URL_FICHEIRO'] == e['url'] ||
+                              f['URL_FICHEIRO'] == e['ficheiro'],
+                          orElse: () => null);
+                  if (fichLocal != null &&
+                      fichLocal['TITULO_REQUISITO'] != null) {
+                    req = _formatarNomeRequisito(fichLocal['TITULO_REQUISITO'],
+                        dadosLocal['NOME_NIVEL'] ?? '');
                   } else if (req.toLowerCase().startsWith('requisito ')) {
-                    req = _formatarNomeRequisito(req, dadosLocal['NOME_NIVEL'] ?? '');
+                    req = _formatarNomeRequisito(
+                        req, dadosLocal['NOME_NIVEL'] ?? '');
                   }
                 }
 
@@ -158,8 +208,10 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
 
   String _formatarAcao(String estado) {
     if (estado == 'Aceite' || estado == 'Aprovado') return "Aprovou o pedido";
-    if (estado == 'Devolvido' || estado == 'Em Correção') return "Devolveu para correção";
-    if (estado == 'Recusado' || estado == 'Rejeitado') return "Rejeitou o pedido";
+    if (estado == 'Devolvido' || estado == 'Em Correção')
+      return "Devolveu para correção";
+    if (estado == 'Recusado' || estado == 'Rejeitado')
+      return "Rejeitou o pedido";
     return "Validou e enviou para o SLL";
   }
 
@@ -206,7 +258,7 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
     } else if (statusAt == 'Devolvido' || statusAt == 'Em Correção') {
       corPrincipal = Colors.amber.shade700;
       iconeStatus = Icons.warning_amber_rounded;
-    } else if (statusAt == 'Rascunho' || statusAt == 'Pendente') {
+    } else if (statusAt == 'Rascunho') {
       corPrincipal = Colors.grey;
       iconeStatus = Icons.edit_document;
     } else {
@@ -334,8 +386,14 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
                                 color: const Color(0xFFF4F5F9),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Icon(Icons.workspace_premium,
-                                  color: Color(0xFF34659D), size: 35),
+                              child: ClipOval(
+                                child: ImagemBadgeMobile(
+                                  urlImagem:
+                                      _dadosPedido!['urlImagem']?.toString(),
+                                  tamanho: 48,
+                                  padding: const EdgeInsets.all(3),
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 15),
                             Expanded(
@@ -347,8 +405,7 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16)),
                                   const SizedBox(height: 4),
-                                  Text(
-                                      _dadosPedido!['sl'],
+                                  Text(_dadosPedido!['sl'],
                                       style: const TextStyle(
                                           color: Color(0xFF0980E9),
                                           fontWeight: FontWeight.w600,
@@ -367,46 +424,27 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
                         ),
                         const Divider(height: 30),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text("Nível",
-                                    style: TextStyle(
-                                        color: Colors.grey, fontSize: 12)),
-                                Text(_dadosPedido!['nivel'] ?? 'N/A',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14)),
-                              ],
+                            Expanded(
+                                child: _infoBadgeCurta(
+                                    "Nível", _dadosPedido!['nivel'] ?? 'N/A')),
+                            Expanded(
+                              child: _infoBadgeCurta(
+                                "Pontos",
+                                "${_dadosPedido!['pontos'] ?? 0} PTS",
+                                alinhamento: CrossAxisAlignment.center,
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text("Pontos",
-                                    style: TextStyle(
-                                        color: Colors.grey, fontSize: 12)),
-                                Text("${_dadosPedido!['pontos'] ?? 0} PTS",
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14)),
-                              ],
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text("Validade",
-                                    style: TextStyle(
-                                        color: Colors.grey, fontSize: 12)),
-                                Text(
-                                    _dadosPedido!['validade'] != null
-                                        ? "${_dadosPedido!['validade']} meses"
-                                        : "Sem validade",
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14)),
-                              ],
+                            Expanded(
+                              child: _infoBadgeCurta(
+                                "Validade",
+                                _dadosPedido!['validade'] != null
+                                    ? "${_dadosPedido!['validade']} meses"
+                                    : "Sem validade",
+                                alinhamento: CrossAxisAlignment.end,
+                                textAlign: TextAlign.end,
+                              ),
                             ),
                           ],
                         ),
@@ -433,8 +471,12 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
                     var passo = entry.value;
                     bool isLast =
                         idx == (_dadosPedido!['historico'].length - 1);
-                    return _construirPassoTimeline(passo['passo'], passo['data'],
-                        passo['status'], passo['subtitulo'], isLast);
+                    return _construirPassoTimeline(
+                        passo['passo'],
+                        passo['data'],
+                        passo['status'],
+                        passo['subtitulo'],
+                        isLast);
                   }).toList(),
 
                   const SizedBox(height: 30),
@@ -475,7 +517,10 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: () => context.push('/badge_detalhe', extra: {'idBadge': _dadosPedido!['id_badge']}),
+                      onPressed: () => context.push('/badge_detalhe', extra: {
+                        'idBadge': _dadosPedido!['id_badge'],
+                        'from': 'catalogo'
+                      }),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF34659D),
                         shape: RoundedRectangleBorder(
@@ -501,11 +546,11 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
   }
 
   // WIDGET PARA CADA LINHA DO HISTÓRICO
-  Widget _construirPassoTimeline(
-      String descricao, String data, String statusType, String subtitulo, bool ultimo) {
+  Widget _construirPassoTimeline(String descricao, String data,
+      String statusType, String subtitulo, bool ultimo) {
     Color corIcone = Colors.green;
     IconData icone = Icons.check_circle;
-    
+
     if (statusType == "warning" || statusType == "pending") {
       corIcone = Colors.amber.shade700;
       icone = Icons.hourglass_top;
@@ -527,7 +572,7 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
             if (!ultimo)
               Container(
                 width: 2,
-                height: 40,
+                height: 64,
                 color: corIcone,
               ),
           ],
@@ -548,13 +593,15 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
               const SizedBox(height: 2),
               Row(
                 children: [
-                  const Icon(Icons.calendar_today, size: 12, color: Colors.grey),
+                  const Icon(Icons.calendar_today,
+                      size: 12, color: Colors.grey),
                   const SizedBox(width: 4),
                   Text(
                     data,
                     style: const TextStyle(color: Colors.grey, fontSize: 12),
                   ),
-                  const Text(" • ", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const Text(" • ",
+                      style: TextStyle(color: Colors.grey, fontSize: 12)),
                   const Icon(Icons.person, size: 12, color: Colors.grey),
                   const SizedBox(width: 4),
                   Flexible(
@@ -576,47 +623,60 @@ class _PedidoStatusViewState extends State<PedidoStatusView> {
 
   // WIDGET PARA OS CARDS DE FICHEIRO
   Widget _construirCardFicheiro(String nomeFicheiro, String url) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black12),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.picture_as_pdf_outlined,
-              color: Colors.grey, size: 30),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(nomeFicheiro,
-                    style: const TextStyle(
-                        fontSize: 13,
-                        color: Colors.blue,
-                        decoration: TextDecoration.underline,
-                        fontWeight: FontWeight.bold)),
-              ],
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.tryParse(url);
+        if (uri != null && uri.hasScheme) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.black12),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.insert_drive_file_outlined,
+                color: Colors.grey, size: 30),
+            const SizedBox(width: 15),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(nomeFicheiro,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.blue,
+                          decoration: TextDecoration.underline,
+                          fontWeight: FontWeight.bold)),
+                ],
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF34659D),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.download, color: Colors.white, size: 14),
-                SizedBox(width: 4),
-                Text("Ver / Download", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))
-              ],
-            )
-          )
-        ],
+            Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF34659D),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.download, color: Colors.white, size: 14),
+                    SizedBox(width: 4),
+                    Text("Ver / Download",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold))
+                  ],
+                ))
+          ],
+        ),
       ),
     );
   }

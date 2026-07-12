@@ -83,6 +83,34 @@ class _RankingPontosViewState extends State<RankingPontosView> {
                   ],
                 ),
               ),
+              pw.SizedBox(height: 20),
+              pw.Text('Evolução do Número de Badges', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 10),
+              pw.Table.fromTextArray(
+                headers: ['Mês', 'Badges Normais', 'Badges Especiais'],
+                data: List<List<String>>.generate(
+                  _estatisticas!['graficoBarras']['labels'].length,
+                  (index) => [
+                    _estatisticas!['graficoBarras']['labels'][index].toString(),
+                    _estatisticas!['graficoBarras']['normais'][index].toString(),
+                    _estatisticas!['graficoBarras']['especiais'][index].toString(),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              pw.Text('Ranking Completo', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 10),
+              pw.Table.fromTextArray(
+                headers: ['Posição', 'Nome', 'Service Line', 'Área', 'Pontos', 'Badges'],
+                data: _rankingCompleto.map((r) => [
+                  '${r['pos']}',
+                  '${r['nome']}',
+                  '${r['serviceLine']}',
+                  '${r['area']}',
+                  '${r['pontos']}',
+                  '${r['badges']}',
+                ]).toList(),
+              ),
             ],
           );
         },
@@ -132,6 +160,46 @@ class _RankingPontosViewState extends State<RankingPontosView> {
       ]);
     }
 
+    // Folha 3: Badges Mensais
+    ex.Sheet sheetBadges = excel['Badges Mensais'];
+    sheetBadges.appendRow([
+      ex.TextCellValue('Mês'),
+      ex.TextCellValue('Badges Normais'),
+      ex.TextCellValue('Badges Especiais')
+    ]);
+    final barras = _estatisticas!['graficoBarras'];
+    final labelsBarras = barras['labels'] as List<dynamic>;
+    final normais = barras['normais'] as List<dynamic>;
+    final especiais = barras['especiais'] as List<dynamic>;
+    for (int i = 0; i < labelsBarras.length; i++) {
+      sheetBadges.appendRow([
+        ex.TextCellValue(labelsBarras[i].toString()),
+        ex.IntCellValue((normais[i] as num).toInt()),
+        ex.IntCellValue((especiais[i] as num).toInt())
+      ]);
+    }
+
+    // Folha 4: Ranking completo
+    ex.Sheet sheetRanking = excel['Ranking Completo'];
+    sheetRanking.appendRow([
+      ex.TextCellValue('Posição'),
+      ex.TextCellValue('Nome'),
+      ex.TextCellValue('Service Line'),
+      ex.TextCellValue('Área'),
+      ex.TextCellValue('Pontos'),
+      ex.TextCellValue('Badges')
+    ]);
+    for (final r in _rankingCompleto) {
+      sheetRanking.appendRow([
+        ex.IntCellValue((r['pos'] as num).toInt()),
+        ex.TextCellValue(r['nome']?.toString() ?? ''),
+        ex.TextCellValue(r['serviceLine']?.toString() ?? ''),
+        ex.TextCellValue(r['area']?.toString() ?? ''),
+        ex.IntCellValue((r['pontos'] as num?)?.toInt() ?? 0),
+        ex.IntCellValue((r['badges'] as num?)?.toInt() ?? 0),
+      ]);
+    }
+
     excel.setDefaultSheet('Resumo');
 
     try {
@@ -173,20 +241,26 @@ class _RankingPontosViewState extends State<RankingPontosView> {
               // KPIS
               Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(child: _buildKpiCard("A Sua Posição", "${kpis['ranking']}º", "de ${kpis['totalConsultores']}", Icons.leaderboard, Colors.amber)),
-                      const SizedBox(width: 15),
-                      Expanded(child: _buildKpiCard("Total de Pontos", "${kpis['pontos']}", "Acumulados", Icons.stars, const Color(0xFF4C51F7))),
-                    ],
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildKpiCard("A Sua Posição", "${kpis['ranking']}º lugar", "de ${kpis['totalConsultores']} consultores da Empresa", Icons.leaderboard, Colors.amber)),
+                        const SizedBox(width: 15),
+                        Expanded(child: _buildKpiCard("Total de Pontos", "${kpis['pontos']}", "Acumulados", Icons.stars, const Color(0xFF4C51F7))),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 15),
-                  Row(
-                    children: [
-                      Expanded(child: _buildKpiCard("Catálogo", "${kpis['percentagemBadges']}%", "Concluído", Icons.book, Colors.green)),
-                      const SizedBox(width: 15),
-                      const Spacer(),
-                    ],
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(child: _buildKpiCard("Catálogo Global", "${kpis['percentagemBadges']}%", "Concluído", Icons.book, Colors.green)),
+                        const SizedBox(width: 15),
+                        const Spacer(),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -353,7 +427,9 @@ class _RankingPontosViewState extends State<RankingPontosView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text("Evolução Mensal de Pontos", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 4),
+          const Text("Últimos 6 meses", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 16),
           Expanded(
             child: LineChart(
               LineChartData(
@@ -371,11 +447,22 @@ class _RankingPontosViewState extends State<RankingPontosView> {
                 titlesData: FlTitlesData(
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 44,
+                      getTitlesWidget: (value, meta) {
+                        if (value != value.roundToDouble()) return const SizedBox.shrink();
+                        return Text(value.toInt().toString(), style: const TextStyle(fontSize: 10, color: Colors.grey));
+                      },
+                    ),
+                  ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
+                        if (value != value.roundToDouble()) return const SizedBox.shrink();
                         int idx = value.toInt();
                         if (idx >= 0 && idx < labels.length) {
                           return Text(labels[idx], style: const TextStyle(fontSize: 10, color: Colors.grey));
@@ -422,7 +509,9 @@ class _RankingPontosViewState extends State<RankingPontosView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text("Evolução do Número de Badges", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 20),
+          const SizedBox(height: 4),
+          const Text("Nos últimos 4 meses", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 16),
           Expanded(
             child: BarChart(
               BarChartData(
@@ -440,11 +529,22 @@ class _RankingPontosViewState extends State<RankingPontosView> {
                 titlesData: FlTitlesData(
                   topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 30)),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 34,
+                      getTitlesWidget: (value, meta) {
+                        if (value != value.roundToDouble()) return const SizedBox.shrink();
+                        return Text(value.toInt().toString(), style: const TextStyle(fontSize: 10, color: Colors.grey));
+                      },
+                    ),
+                  ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
+                        if (value != value.roundToDouble()) return const SizedBox.shrink();
                         int idx = value.toInt();
                         if (idx >= 0 && idx < labels.length) {
                           return Text(labels[idx], style: const TextStyle(fontSize: 10, color: Colors.grey));
@@ -496,10 +596,13 @@ class _RankingPontosViewState extends State<RankingPontosView> {
   }
 
   Widget _buildKpiCard(String title, String value, String subtitle, IconData icon, Color color) {
-    return Container(
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 160),
+      child: Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(icon, color: color, size: 30),
           const SizedBox(height: 10),
@@ -508,6 +611,7 @@ class _RankingPontosViewState extends State<RankingPontosView> {
           Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center),
           Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 11), textAlign: TextAlign.center),
         ],
+      ),
       ),
     );
   }

@@ -31,15 +31,19 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
 
   Future<void> _carregarDetalhe() async {
     final bd = BDLocalAjudante();
-    
-    final res = await bd.database.then((db) => db.rawQuery('SELECT ID_UTILIZADOR FROM CONSULTOR WHERE ID_CONSULTOR = ?', [widget.idConsultor]));
+
+    final res = await bd.database.then((db) => db.rawQuery(
+        'SELECT ID_UTILIZADOR FROM CONSULTOR WHERE ID_CONSULTOR = ?',
+        [widget.idConsultor]));
     int idUtilizador = 1;
     if (res.isNotEmpty) {
       idUtilizador = res.first['ID_UTILIZADOR'] as int;
     }
-    
-    final detalheFinal = await bd.obterBadgeDetalhe(widget.idBadge, idUtilizador);
-    final evidenciasFinal = await bd.obterEvidenciasDePedidoAprovado(widget.idBadge, idUtilizador);
+
+    final detalheFinal =
+        await bd.obterBadgeDetalhe(widget.idBadge, idUtilizador);
+    final evidenciasFinal =
+        await bd.obterEvidenciasDePedidoAprovado(widget.idBadge, idUtilizador);
 
     if (!mounted) return;
     setState(() {
@@ -61,27 +65,49 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
 
   Widget _widgetExpiracao(Map<String, dynamic> badge) {
     if (badge['validadeMeses'] == null || badge['validadeMeses'] == 0) {
-      return const Text("Não expira", style: TextStyle(fontSize: 13, color: Colors.green));
+      return const Text("Não expira",
+          style: TextStyle(fontSize: 13, color: Colors.green));
     }
-    
+
     if (badge['dataExpiracao'] != null) {
       try {
         DateTime expiracao = DateTime.parse(badge['dataExpiracao']);
-        int dias = expiracao.difference(DateTime.now()).inDays;
+        int dias = (expiracao.difference(DateTime.now()).inMilliseconds /
+                Duration.millisecondsPerDay)
+            .ceil();
         String dataExpF = _formatarData(badge['dataExpiracao']);
-        
+
         if (dias < 0) {
-          return Text("Expirado ($dataExpF)", style: const TextStyle(fontSize: 13, color: Colors.red, fontWeight: FontWeight.bold));
+          return Text("Expirado ($dataExpF)",
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold));
         } else if (dias < 30) {
-          return Text("Expira em $dias dias ($dataExpF)", style: const TextStyle(fontSize: 13, color: Colors.orange, fontWeight: FontWeight.bold));
+          return Text("Expira em $dias dias ($dataExpF)",
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.orange,
+                  fontWeight: FontWeight.bold));
         } else {
-          return Text("Expira em $dias dias ($dataExpF)", style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold));
+          return Text("Expira em $dias dias ($dataExpF)",
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Colors.green,
+                  fontWeight: FontWeight.bold));
         }
       } catch (e) {
         return const SizedBox();
       }
     }
     return const SizedBox();
+  }
+
+  String _textoNivel(Map<String, dynamic> badge) {
+    final letra = badge['nivel']?.toString() ?? '';
+    final nome = badge['nomeNivel']?.toString() ?? 'Nível $letra';
+    if (nome.contains('(')) return nome;
+    return "$nome ($letra)";
   }
 
   Future<void> _abrirUrl(String urlString) async {
@@ -129,7 +155,9 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
                   children: [
                     Icon(Icons.arrow_back, color: Colors.grey, size: 20),
                     SizedBox(width: 5),
-                    Text("Voltar à Galeria de Badges", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                    Text("Voltar à Galeria de Badges",
+                        style: TextStyle(
+                            color: Colors.grey, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -163,15 +191,18 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: Colors.white,
-                              border: Border.all(color: const Color(0xFF4C51F7), width: 1.5),
+                              border: Border.all(
+                                  color: const Color(0xFF4C51F7), width: 1.5),
                             ),
                             child: const Center(
-                              child: Icon(Icons.emoji_events, size: 70, color: Colors.amber),
+                              child: Icon(Icons.emoji_events,
+                                  size: 70, color: Colors.amber),
                             ),
                           ),
                           const SizedBox(height: 15),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 5),
                             decoration: BoxDecoration(
                               border: Border.all(color: Colors.green),
                               borderRadius: BorderRadius.circular(20),
@@ -179,22 +210,45 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.circle, color: Colors.green, size: 10),
+                                Icon(Icons.circle,
+                                    color: Colors.green, size: 10),
                                 SizedBox(width: 5),
-                                Text("Status: Ativo", style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold)),
+                                Text("Status: Ativo",
+                                    style: TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
                           const SizedBox(height: 15),
-                          Text("Obtido em: ${_formatarData(_detalhe!['dataObtencao'])}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text(
+                              "Obtido em: ${_formatarData(_detalhe!['dataObtencao'])}",
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 5),
                           _widgetExpiracao(_detalhe!),
                           const SizedBox(height: 20),
-                          _buildInfoRow("Service Line:", _detalhe!['sl']),
+                          Text(
+                            _detalhe!['sl']?.toString() ?? '',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFF34659D),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
                           _buildInfoRow("Área:", _detalhe!['area']),
-                          _buildInfoRow("Nível:", "${_detalhe!['nivel']} (Nível ${_detalhe!['nivel']})"),
-                          _buildInfoRow("Validade:", _detalhe!['validadeMeses'] == null || _detalhe!['validadeMeses'] == 0 ? "Sempre" : "${(_detalhe!['validadeMeses'] / 12).toStringAsFixed(0)} anos"),
-                          _buildInfoRow("Pontos:", "${_detalhe!['pontos']} pontos"),
+                          _buildInfoRow("Nível:", _textoNivel(_detalhe!)),
+                          _buildInfoRow(
+                              "Validade:",
+                              _detalhe!['validadeMeses'] == null ||
+                                      _detalhe!['validadeMeses'] == 0
+                                  ? "Sem expiração"
+                                  : "${_detalhe!['validadeMeses']} meses"),
+                          _buildInfoRow(
+                              "Pontos:", "${_detalhe!['pontos']} pontos"),
                         ],
                       ),
                     ),
@@ -205,9 +259,13 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text("Descrição", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          const Text("Descrição",
+                              style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 10),
-                          Text(_detalhe!['descricao'], style: const TextStyle(color: Colors.black87, height: 1.5)),
+                          Text(_detalhe!['descricao'],
+                              style: const TextStyle(
+                                  color: Colors.black87, height: 1.5)),
                         ],
                       ),
                     ),
@@ -218,7 +276,8 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
               const SizedBox(height: 30),
 
               // SECÇÃO REQUISITOS
-              const Text("Requisitos concluídos para a sua Obtenção", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text("Requisitos concluídos para a sua Obtenção",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 15),
               SizedBox(
                 height: 200,
@@ -236,52 +295,52 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
               const SizedBox(height: 30),
 
               // SECÇÃO DE PARTILHA
-              const Text("Partilha e Opções de Badge", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text("Partilha e Opções de Badge",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 15),
               Row(
                 children: [
                   Expanded(
                     child: _buildShareButton(
-                      "Partilhar no LinkedIn", 
-                      Icons.work, 
-                      Colors.blue.shade800, 
-                      Colors.white, 
-                      false,
-                      () => _abrirUrl("https://www.linkedin.com/")
-                    ),
+                        "Partilhar no LinkedIn",
+                        Icons.work,
+                        Colors.blue.shade800,
+                        Colors.white,
+                        false,
+                        () => _abrirUrl("https://www.linkedin.com/")),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _buildShareButton(
-                      "Link de Verificação", 
-                      Icons.link, 
-                      const Color(0xFF4C51F7), 
-                      Colors.white, 
-                      true, // Filled
-                      () => _abrirUrl("https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")
-                    ),
+                        "Link de Verificação",
+                        Icons.link,
+                        const Color(0xFF4C51F7),
+                        Colors.white,
+                        true, // Filled
+                        () => _abrirUrl(
+                            "https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _buildShareButton(
-                      "Certificado Oficial", 
-                      Icons.picture_as_pdf, 
-                      Colors.red.shade400, 
-                      Colors.white, 
-                      false,
-                      () => _abrirUrl("https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")
-                    ),
+                        "Certificado Oficial",
+                        Icons.picture_as_pdf,
+                        Colors.red.shade400,
+                        Colors.white,
+                        false,
+                        () => _abrirUrl(
+                            "https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: _buildShareButton(
-                      "Assinatura de Email", 
-                      Icons.email, 
-                      Colors.green.shade600, 
-                      Colors.white, 
-                      false,
-                      () => _abrirUrl("https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")
-                    ),
+                        "Assinatura de Email",
+                        Icons.email,
+                        Colors.green.shade600,
+                        Colors.white,
+                        false,
+                        () => _abrirUrl(
+                            "https://softinsa-plataforma.onrender.com/verificacao/${_detalhe!['linkUnico']}")),
                   ),
                 ],
               ),
@@ -299,9 +358,13 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          Text(label,
+              style:
+                  const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
           const SizedBox(width: 5),
-          Expanded(child: Text(value, style: const TextStyle(fontSize: 13, color: Colors.black87))),
+          Expanded(
+              child: Text(value,
+                  style: const TextStyle(fontSize: 13, color: Colors.black87))),
         ],
       ),
     );
@@ -319,51 +382,68 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
       ),
       child: Column(
         children: [
-          Text(req['titulo'], style: const TextStyle(color: Color(0xFF4C51F7), fontWeight: FontWeight.bold, fontSize: 15), textAlign: TextAlign.center),
+          Text(req['titulo'],
+              style: const TextStyle(
+                  color: Color(0xFF4C51F7),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15),
+              textAlign: TextAlign.center),
           const SizedBox(height: 5),
-          Text(req['desc'], style: const TextStyle(color: Colors.black87, fontSize: 12), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+          Text(req['desc'],
+              style: const TextStyle(color: Colors.black87, fontSize: 12),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
           const SizedBox(height: 15),
           const Divider(),
           const SizedBox(height: 10),
           const Align(
             alignment: Alignment.centerLeft,
-            child: Text("Evidências Submetidas:", style: TextStyle(fontSize: 11, color: Colors.grey)),
+            child: Text("Evidências Submetidas:",
+                style: TextStyle(fontSize: 11, color: Colors.grey)),
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: _evidencias.isEmpty 
-              ? const Text("Sem ficheiros mapeados.", style: TextStyle(fontSize: 11, color: Colors.grey))
-              : ListView.builder(
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: _evidencias.length,
-                  itemBuilder: (context, index) {
-                    final ev = _evidencias[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 5.0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.insert_drive_file, size: 14, color: Color(0xFF4C51F7)),
-                          const SizedBox(width: 5),
-                          Expanded(
-                            child: Text(
-                              ev['CAMINHO_EVIDENCIA'].toString().split('/').last, 
-                              style: const TextStyle(fontSize: 12, color: Color(0xFF4C51F7)),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+            child: _evidencias.isEmpty
+                ? const Text("Sem ficheiros mapeados.",
+                    style: TextStyle(fontSize: 11, color: Colors.grey))
+                : ListView.builder(
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: _evidencias.length,
+                    itemBuilder: (context, index) {
+                      final ev = _evidencias[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 5.0),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.insert_drive_file,
+                                size: 14, color: Color(0xFF4C51F7)),
+                            const SizedBox(width: 5),
+                            Expanded(
+                              child: Text(
+                                ev['CAMINHO_EVIDENCIA']
+                                    .toString()
+                                    .split('/')
+                                    .last,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Color(0xFF4C51F7)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           )
         ],
       ),
     );
   }
 
-  Widget _buildShareButton(String text, IconData icon, Color corPrincipal, Color corTexto, bool isFilled, VoidCallback onTap) {
+  Widget _buildShareButton(String text, IconData icon, Color corPrincipal,
+      Color corTexto, bool isFilled, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -378,7 +458,12 @@ class _MeusBadgesDetalheViewState extends State<MeusBadgesDetalheView> {
           children: [
             Icon(icon, color: isFilled ? corTexto : corPrincipal, size: 24),
             const SizedBox(height: 8),
-            Text(text, style: TextStyle(color: isFilled ? corTexto : Colors.black87, fontSize: 11, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            Text(text,
+                style: TextStyle(
+                    color: isFilled ? corTexto : Colors.black87,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center),
           ],
         ),
       ),

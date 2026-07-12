@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
+import '../components/imagem_badge_mobile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HistoricoCandidaturasView extends StatefulWidget {
@@ -18,7 +19,7 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
   String _servicoEscolhido = "Todas as Service Lines";
   String _areaEscolhida = "Todas as Áreas";
   String _periodoEscolhido = "Sempre";
-  
+
   List<String> _todasServiceLines = ["Todas as Service Lines"];
   List<String> _todasAreas = ["Todas as Áreas"];
   List<String> _niveisAtivos = [];
@@ -31,12 +32,13 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
 
   final List<String> _listaStatusWeb = [
     "Todos os Status",
-    "Em Preenchimento",
+    "Em Preenchimento (Rascunho)",
     "Análise Talent",
     "Análise SLL",
     "Aceite (Aprovado)",
-    "Pendente Correção",
-    "Recusado"
+    "Devolvido (Correção)",
+    "Recusado",
+    "Eliminado"
   ];
 
   @override
@@ -53,25 +55,32 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
     if (_areaEscolhida != "Todas as Áreas") {
       badges = badges.where((e) => e['area'] == _areaEscolhida).toList();
     }
-    
+
     final todasL = badges.map((e) => e['nivel'].toString()).toSet().toList();
     todasL.sort();
-    
+
     // Niveis Globais Base baseados na Area
     List<String> niveisParaRenderizar = [];
     if (_areaEscolhida != "Todas as Áreas" && estruturaGlobal != null) {
-      final a = estruturaGlobal.areas?.firstWhere((element) => element.nome == _areaEscolhida, orElse: () => null);
+      final a = estruturaGlobal.areas?.firstWhere(
+          (element) => element.nome == _areaEscolhida,
+          orElse: () => null);
       if (a != null && a.niveisAtivos != null) {
-        final ativos = a.niveisAtivos.toString().split(' ').where((x) => x.isNotEmpty).toList();
+        final ativos = a.niveisAtivos
+            .toString()
+            .split(' ')
+            .where((x) => x.isNotEmpty)
+            .toList();
         for (int i = 0; i < ativos.length; i++) {
-           niveisParaRenderizar.add(String.fromCharCode(65 + i)); // A, B, C...
+          niveisParaRenderizar.add(String.fromCharCode(65 + i)); // A, B, C...
         }
       }
     }
 
     if (niveisParaRenderizar.isEmpty) {
       niveisParaRenderizar = todasL.map((nivel) {
-        if (nivel.startsWith('Nível ')) return nivel.replaceFirst('Nível ', '').trim();
+        if (nivel.startsWith('Nível '))
+          return nivel.replaceFirst('Nível ', '').trim();
         if (nivel.length == 1) return nivel;
         return nivel;
       }).toList();
@@ -88,9 +97,18 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
       _servicoEscolhido = sl;
       _areaEscolhida = "Todas as Áreas";
       if (sl == "Todas as Service Lines") {
-        _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.map((e) => e['area'].toString()).toSet()];
+        _todasAreas = [
+          "Todas as Áreas",
+          ..._todosBadgesGlobais.map((e) => e['area'].toString()).toSet()
+        ];
       } else {
-        _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.where((e) => e['sl'] == sl).map((e) => e['area'].toString()).toSet()];
+        _todasAreas = [
+          "Todas as Áreas",
+          ..._todosBadgesGlobais
+              .where((e) => e['sl'] == sl)
+              .map((e) => e['area'].toString())
+              .toSet()
+        ];
       }
       _todasAreas.sort();
       _atualizarNiveisDinamicos();
@@ -118,13 +136,20 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
     if (idUtilizador == null) return;
 
     final bd = BDLocalAjudante();
-    
+
     final dadosH = await bd.obterHistoricoCandidaturas(idUtilizador);
     for (var d in dadosH) {
-      if (d['status'] == 'Rascunho') d['status'] = 'Em Preenchimento';
-      else if (d['status'] == 'Pendente' || d['status'] == 'Em Análise TM') d['status'] = 'Análise Talent';
-      else if (d['status'] == 'Em Análise SLL') d['status'] = 'Análise SLL';
-      else if (d['status'] == 'Pendente de Correção' || d['status'] == 'Em Correção') d['status'] = 'Pendente Correção';
+      if (d['status'] == 'Rascunho')
+        d['status'] = 'Em Preenchimento (Rascunho)';
+      else if (d['status'] == 'Pendente' || d['status'] == 'Em Análise TM')
+        d['status'] = 'Análise Talent';
+      else if (d['status'] == 'Em Análise SLL')
+        d['status'] = 'Análise SLL';
+      else if (d['status'] == 'Pendente de Correção' ||
+          d['status'] == 'Em Correção' ||
+          d['status'] == 'Devolvido')
+        d['status'] = 'Devolvido (Correção)';
+      else if (d['status'] == 'Eliminado') d['status'] = 'Eliminado';
     }
     final dadosC = await bd.obterCatalogo(idUtilizador);
 
@@ -132,8 +157,12 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
     setState(() {
       _listaCandidaturas = dadosH;
       _todosBadgesGlobais = List<Map<String, dynamic>>.from(dadosC['todos']);
-      
-      _todasServiceLines = ["Todas as Service Lines", ..._todosBadgesGlobais.map((e) => e['sl'].toString()).toSet().toList()..sort()];
+
+      _todasServiceLines = [
+        "Todas as Service Lines",
+        ..._todosBadgesGlobais.map((e) => e['sl'].toString()).toSet().toList()
+          ..sort()
+      ];
       _atualizarAreasPorSL("Todas as Service Lines");
       _isLoading = false;
     });
@@ -143,18 +172,23 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
     DateTime now = DateTime.now();
     return _listaCandidaturas.where((item) {
       // Filtro Cascata
-      bool slMatch = _servicoEscolhido == "Todas as Service Lines" || item["sl"] == _servicoEscolhido;
-      bool areaMatch = _areaEscolhida == "Todas as Áreas" || item["area"] == _areaEscolhida;
+      bool slMatch = _servicoEscolhido == "Todas as Service Lines" ||
+          item["sl"] == _servicoEscolhido;
+      bool areaMatch =
+          _areaEscolhida == "Todas as Áreas" || item["area"] == _areaEscolhida;
 
       // Filtro Nível
       bool nivelMatch = true;
       if (_niveisSelecionados.isNotEmpty) {
         String nivelRaw = item["nivel"]?.toString() ?? "";
         String letra = "";
-        if (nivelRaw.startsWith('Nível ')) letra = nivelRaw.replaceFirst('Nível ', '').trim();
-        else if (nivelRaw.length == 1) letra = nivelRaw;
-        else letra = nivelRaw.split(' ').first;
-        
+        if (nivelRaw.startsWith('Nível '))
+          letra = nivelRaw.replaceFirst('Nível ', '').trim();
+        else if (nivelRaw.length == 1)
+          letra = nivelRaw;
+        else
+          letra = nivelRaw.split(' ').first;
+
         nivelMatch = _niveisSelecionados.contains(letra);
       }
 
@@ -162,13 +196,22 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
       bool matchStatus = true;
       String st = item['status'].toString();
       if (_filtroStatus != "Todos os Status") {
-        if (_filtroStatus == "Em Preenchimento") matchStatus = st == "Em Preenchimento";
-        else if (_filtroStatus == "Análise Talent") matchStatus = st == "Análise Talent";
-        else if (_filtroStatus == "Análise SLL") matchStatus = st == "Análise SLL";
-        else if (_filtroStatus == "Aceite (Aprovado)") matchStatus = st == "Aceite" || st == "Aprovado";
-        else if (_filtroStatus == "Pendente Correção") matchStatus = st == "Pendente Correção" || st == "Devolvido";
-        else if (_filtroStatus == "Recusado") matchStatus = st == "Recusado" || st == "Rejeitado";
-        else matchStatus = false;
+        if (_filtroStatus == "Em Preenchimento (Rascunho)")
+          matchStatus = st == "Em Preenchimento (Rascunho)";
+        else if (_filtroStatus == "Análise Talent")
+          matchStatus = st == "Análise Talent";
+        else if (_filtroStatus == "Análise SLL")
+          matchStatus = st == "Análise SLL";
+        else if (_filtroStatus == "Aceite (Aprovado)")
+          matchStatus = st == "Aceite" || st == "Aprovado";
+        else if (_filtroStatus == "Devolvido (Correção)")
+          matchStatus = st == "Devolvido (Correção)" || st == "Devolvido";
+        else if (_filtroStatus == "Recusado")
+          matchStatus = st == "Recusado" || st == "Rejeitado";
+        else if (_filtroStatus == "Eliminado")
+          matchStatus = st == "Eliminado";
+        else
+          matchStatus = false;
       }
 
       // Filtro Periodo
@@ -204,8 +247,12 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
   Color _obterCorStatus(String status) {
     if (status == "Aceite" || status == "Aprovado") return Colors.green;
     if (status == "Recusado" || status == "Rejeitado") return Colors.red;
-    if (status == "Pendente Correção" || status == "Devolvido" || status == "Em Correção") return Colors.amber.shade700;
-    if (status == "Em Preenchimento" || status == "Rascunho") return Colors.grey;
+    if (status == "Eliminado") return Colors.grey.shade700;
+    if (status == "Devolvido (Correção)" ||
+        status == "Devolvido" ||
+        status == "Em Correção") return Colors.amber.shade700;
+    if (status == "Em Preenchimento (Rascunho)" || status == "Rascunho")
+      return Colors.grey;
     return Colors.lightBlue; // Análise Talent e Análise SLL
   }
 
@@ -218,18 +265,19 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
     return Icons.auto_awesome; // Default
   }
 
-  Widget _construirImagemBadge(String? urlImagem, IconData iconeFallback, double raio) {
-    if (urlImagem != null && urlImagem.isNotEmpty) {
-      if (urlImagem.startsWith('http')) {
-        return CircleAvatar(
-          backgroundColor: Colors.transparent,
-          radius: raio,
-          backgroundImage: NetworkImage(urlImagem),
-          onBackgroundImageError: (_, __) {},
-        );
-      }
-    }
-    return Icon(iconeFallback, color: const Color(0xFF34659D), size: raio * 1.5);
+  Widget _construirImagemBadge(
+      String? urlImagem, IconData iconeFallback, double raio) {
+    return SizedBox(
+      width: raio * 2,
+      height: raio * 2,
+      child: ClipOval(
+        child: ImagemBadgeMobile(
+          urlImagem: urlImagem,
+          tamanho: raio * 2,
+          padding: const EdgeInsets.all(3),
+        ),
+      ),
+    );
   }
 
   @override
@@ -269,7 +317,11 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text("Pesquisa e Filtros", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A))),
+                    const Text("Pesquisa e Filtros",
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A1A1A))),
                     const SizedBox(height: 15),
 
                     // PERIODO
@@ -283,17 +335,27 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                         child: DropdownButton<String>(
                           value: _periodoEscolhido,
                           isExpanded: true,
-                          icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF34659D)),
-                          style: const TextStyle(fontSize: 14, color: Colors.black87),
-                          items: ["Sempre", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias", "Último Ano"]
-                              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                          icon: const Icon(Icons.keyboard_arrow_down,
+                              color: Color(0xFF34659D)),
+                          style: const TextStyle(
+                              fontSize: 14, color: Colors.black87),
+                          items: [
+                            "Sempre",
+                            "Últimos 7 dias",
+                            "Últimos 30 dias",
+                            "Últimos 90 dias",
+                            "Último Ano"
+                          ]
+                              .map((s) =>
+                                  DropdownMenuItem(value: s, child: Text(s)))
                               .toList(),
-                          onChanged: (v) => setState(() => _periodoEscolhido = v!),
+                          onChanged: (v) =>
+                              setState(() => _periodoEscolhido = v!),
                         ),
                       ),
                     ),
                     const SizedBox(height: 10),
-                    
+
                     // SERVICE LINE
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 15),
@@ -306,10 +368,16 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                           value: _servicoEscolhido,
                           isExpanded: true,
                           menuMaxHeight: 300,
-                          icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF34659D)),
-                          style: const TextStyle(fontSize: 14, color: Colors.black87),
+                          icon: const Icon(Icons.keyboard_arrow_down,
+                              color: Color(0xFF34659D)),
+                          style: const TextStyle(
+                              fontSize: 14, color: Colors.black87),
                           items: _todasServiceLines
-                              .map((s) => DropdownMenuItem(value: s, child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis)))
+                              .map((s) => DropdownMenuItem(
+                                  value: s,
+                                  child: Text(s,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis)))
                               .toList(),
                           onChanged: (v) => _atualizarAreasPorSL(v!),
                         ),
@@ -329,10 +397,16 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                           value: _areaEscolhida,
                           isExpanded: true,
                           menuMaxHeight: 300,
-                          icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFF34659D)),
-                          style: const TextStyle(fontSize: 14, color: Colors.black87),
+                          icon: const Icon(Icons.keyboard_arrow_down,
+                              color: Color(0xFF34659D)),
+                          style: const TextStyle(
+                              fontSize: 14, color: Colors.black87),
                           items: _todasAreas
-                              .map((s) => DropdownMenuItem(value: s, child: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis)))
+                              .map((s) => DropdownMenuItem(
+                                  value: s,
+                                  child: Text(s,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis)))
                               .toList(),
                           onChanged: (v) => _atualizarSLPorArea(v!),
                         ),
@@ -341,7 +415,11 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                     const SizedBox(height: 15),
 
                     // NÍVEIS DE COMPETÊNCIA
-                    const Text("Filtrar por Nível:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black54)),
+                    const Text("Filtrar por Nível:",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.black54)),
                     const SizedBox(height: 10),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -357,11 +435,23 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                               height: 45,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: sel ? const Color(0xFF34659D) : Colors.white,
+                                color: sel
+                                    ? const Color(0xFF34659D)
+                                    : Colors.white,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: sel ? const Color(0xFF34659D) : Colors.grey.shade300, width: 1.5),
+                                border: Border.all(
+                                    color: sel
+                                        ? const Color(0xFF34659D)
+                                        : Colors.grey.shade300,
+                                    width: 1.5),
                               ),
-                              child: Text(n, style: TextStyle(color: sel ? Colors.white : const Color(0xFF34659D), fontWeight: FontWeight.bold, fontSize: 16)),
+                              child: Text(n,
+                                  style: TextStyle(
+                                      color: sel
+                                          ? Colors.white
+                                          : const Color(0xFF34659D),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16)),
                             ),
                           );
                         }).toList(),
@@ -374,7 +464,9 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                       scrollDirection: Axis.horizontal,
                       physics: const BouncingScrollPhysics(),
                       child: Row(
-                        children: _listaStatusWeb.map((st) => _construirChipFiltro(st)).toList(),
+                        children: _listaStatusWeb
+                            .map((st) => _construirChipFiltro(st))
+                            .toList(),
                       ),
                     ),
                   ],
@@ -417,7 +509,8 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(15),
                             onTap: () {
-                              context.push('/pedido_status', extra: {'idPedido': item['id']});
+                              context.push('/pedido_status',
+                                  extra: {'idPedido': item['id']});
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(16.0),
@@ -425,20 +518,26 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Container(
                                         padding: const EdgeInsets.all(5),
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF4F5F9),
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
                                         ),
-                                        child: _construirImagemBadge(item['icone'], _obterIconePorArea(item['sl']), 18),
+                                        child: _construirImagemBadge(
+                                            item['icone'],
+                                            _obterIconePorArea(item['sl']),
+                                            18),
                                       ),
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               item['titulo'],
@@ -454,7 +553,8 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                                             Text(
                                               item['sl'],
                                               style: const TextStyle(
-                                                color: Color(0xFF34659D), // Dark Blue for Service Line
+                                                color: Color(
+                                                    0xFF34659D), // Dark Blue for Service Line
                                                 fontWeight: FontWeight.w600,
                                                 fontSize: 13,
                                               ),
@@ -465,7 +565,8 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                                             Text(
                                               "${item['area']} - Nível ${item['nivel']}",
                                               style: const TextStyle(
-                                                color: Color(0xFF0980E9), // Light Blue for Area
+                                                color: Color(
+                                                    0xFF0980E9), // Light Blue for Area
                                                 fontWeight: FontWeight.w600,
                                                 fontSize: 12,
                                               ),
@@ -481,28 +582,51 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                                   const Divider(height: 1),
                                   const SizedBox(height: 15),
                                   Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          const Text("Submissão", style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                                          Text(_formatarDataStr(item['data_submissao'] ?? item['data']), style: const TextStyle(fontSize: 11)),
+                                          const Text("Submissão",
+                                              style: TextStyle(
+                                                  color: Colors.grey,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold)),
+                                          Text(
+                                              _formatarDataStr(
+                                                  item['data_submissao'] ??
+                                                      item['data']),
+                                              style: const TextStyle(
+                                                  fontSize: 11)),
                                         ],
                                       ),
                                       Column(
-                                        crossAxisAlignment: CrossAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
                                         children: [
-                                          const Text("Última Ação", style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                                          Text(_formatarDataStr(item['data_acao'] ?? item['data']), style: const TextStyle(fontSize: 11)),
+                                          const Text("Última Ação",
+                                              style: TextStyle(
+                                                  color: Colors.grey,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold)),
+                                          Text(
+                                              _formatarDataStr(
+                                                  item['data_acao'] ??
+                                                      item['data']),
+                                              style: const TextStyle(
+                                                  fontSize: 11)),
                                         ],
                                       ),
                                       Flexible(
                                         child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 10, vertical: 4),
                                           decoration: BoxDecoration(
                                             color: corEstado.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(15),
+                                            borderRadius:
+                                                BorderRadius.circular(15),
                                           ),
                                           child: Text(
                                             item['status'],
@@ -524,9 +648,14 @@ class _HistoricoCandidaturasViewState extends State<HistoricoCandidaturasView> {
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text("Ver Detalhes", style: TextStyle(color: Color(0xFF34659D), fontWeight: FontWeight.bold, fontSize: 12)),
+                                        Text("Ver Detalhes",
+                                            style: TextStyle(
+                                                color: Color(0xFF34659D),
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12)),
                                         SizedBox(width: 4),
-                                        Icon(Icons.chevron_right, color: Color(0xFF34659D), size: 16),
+                                        Icon(Icons.chevron_right,
+                                            color: Color(0xFF34659D), size: 16),
                                       ],
                                     ),
                                   )

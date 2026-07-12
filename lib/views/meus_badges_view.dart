@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../components/imagem_badge_mobile.dart';
 
 class MeusBadgesView extends StatefulWidget {
   const MeusBadgesView({super.key});
@@ -22,7 +23,7 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
 
   List<String> _todasServiceLines = ["Todas as Service Lines"];
   List<String> _todasAreas = ["Todas as Áreas"];
-  
+
   List<Map<String, dynamic>> _todosBadgesGlobais = [];
 
   // Dados Dinâmicos
@@ -39,37 +40,35 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
 
   Future<void> _carregarMeusBadges() async {
     final bd = BDLocalAjudante();
-    
-    // Tentar obter da DB o utilizador atual (mesma lógica do Catálogo)
-    final dbObj = await bd.database;
-    final users = await dbObj.rawQuery('SELECT ID_UTILIZADOR FROM UTILIZADOR LIMIT 1');
-    
-    int idUtilizador = 1; // Fallback default
-    if (users.isNotEmpty) {
-      idUtilizador = users.first['ID_UTILIZADOR'] as int;
-    } else {
-      // Tentar SharedPreferences se não houver na BD (apesar de raro)
-      final prefs = await SharedPreferences.getInstance();
-      idUtilizador = prefs.getInt('idUtilizador') ?? 1;
+    final prefs = await SharedPreferences.getInstance();
+    final idUtilizador = prefs.getInt('idUtilizador') ?? -1;
+    if (idUtilizador == -1) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      return;
     }
-    
+
     final dados = await bd.obterMeusBadges(idUtilizador);
     final catalogo = await bd.obterCatalogo(idUtilizador);
 
     if (!mounted) return;
-    
+
     setState(() {
       _idUtilizador = idUtilizador;
       _meusBadges = dados;
       if (dados.isNotEmpty) {
         _idConsultor = dados.first['idConsultor'] ?? -1;
       }
-      
+
       // Armazenar os badges globais para construir os filtros com as mesmas opções do Catálogo
       _todosBadgesGlobais = List<Map<String, dynamic>>.from(catalogo['todos']);
-      
+
       // Construir Service Lines com base no Catálogo GLOBAL
-      _todasServiceLines = ["Todas as Service Lines", ..._todosBadgesGlobais.map((e) => e['sl'].toString()).toSet().toList()..sort()];
+      _todasServiceLines = [
+        "Todas as Service Lines",
+        ..._todosBadgesGlobais.map((e) => e['sl'].toString()).toSet().toList()
+          ..sort()
+      ];
 
       _atualizarAreasPorSL("Todas as Service Lines");
 
@@ -81,9 +80,18 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
     _servicoEscolhido = sl;
     _areaEscolhida = "Todas as Áreas";
     if (sl == "Todas as Service Lines") {
-      _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.map((e) => e['area'].toString()).toSet()];
+      _todasAreas = [
+        "Todas as Áreas",
+        ..._todosBadgesGlobais.map((e) => e['area'].toString()).toSet()
+      ];
     } else {
-      _todasAreas = ["Todas as Áreas", ..._todosBadgesGlobais.where((e) => e['sl'] == sl).map((e) => e['area'].toString()).toSet()];
+      _todasAreas = [
+        "Todas as Áreas",
+        ..._todosBadgesGlobais
+            .where((e) => e['sl'] == sl)
+            .map((e) => e['area'].toString())
+            .toSet()
+      ];
     }
     _atualizarNiveis();
   }
@@ -98,21 +106,19 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
     }
     _todosNiveis = badges.map((e) => e['nivel'].toString()).toSet().toList();
     _todosNiveis.sort();
-    
-    // Se a lista de selecionados estiver vazia ou tiver algo inválido, resetamos
+
     _niveisSelecionados.removeWhere((n) => !_todosNiveis.contains(n));
-    if (_niveisSelecionados.isEmpty) {
-      _niveisSelecionados = List.from(_todosNiveis);
-    }
   }
 
   Future<void> _abrirGaleriaGlobal() async {
     if (_idUtilizador == -1) return;
-    final url = Uri.parse('https://softinsa-plataforma.onrender.com/galeria/$_idUtilizador');
+    final url = Uri.parse(
+        'https://softinsa-plataforma.onrender.com/galeria/$_idUtilizador');
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível abrir a galeria global.')),
+          const SnackBar(
+              content: Text('Não foi possível abrir a galeria global.')),
         );
       }
     }
@@ -132,6 +138,13 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
     });
   }
 
+  String _textoNivel(Map<String, dynamic> badge) {
+    final letra = badge['nivel']?.toString() ?? '';
+    final nome = badge['nomeNivel']?.toString() ?? 'Nível $letra';
+    if (nome.contains('(')) return nome;
+    return "$nome ($letra)";
+  }
+
   List<Map<String, dynamic>> _obterBadgesFiltrados() {
     return _meusBadges.where((badge) {
       bool textoMatch = _pesquisaController.text.isEmpty ||
@@ -141,9 +154,10 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
               .contains(_pesquisaController.text.toLowerCase());
       bool slMatch = _servicoEscolhido == "Todas as Service Lines" ||
           badge["sl"] == _servicoEscolhido;
-      bool areaMatch = _areaEscolhida == "Todas as Áreas" ||
-          badge["area"] == _areaEscolhida;
-      bool nivelMatch = _niveisSelecionados.contains(badge["nivel"]);
+      bool areaMatch =
+          _areaEscolhida == "Todas as Áreas" || badge["area"] == _areaEscolhida;
+      bool nivelMatch = _niveisSelecionados.isEmpty ||
+          _niveisSelecionados.contains(badge["nivel"]);
       return textoMatch && slMatch && areaMatch && nivelMatch;
     }).toList();
   }
@@ -152,16 +166,20 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return LayoutConsultor(
-        corpo: const Center(child: CircularProgressIndicator(color: Color(0xFF34659D))),
+        corpo: const Center(
+            child: CircularProgressIndicator(color: Color(0xFF34659D))),
       );
     }
 
     // Safety checks para evitar crash no Dropdown devido ao Hot Reload (mantém o valor antigo)
     if (!_todasServiceLines.contains(_servicoEscolhido)) {
-      _servicoEscolhido = _todasServiceLines.isNotEmpty ? _todasServiceLines.first : "Todas as Service Lines";
+      _servicoEscolhido = _todasServiceLines.isNotEmpty
+          ? _todasServiceLines.first
+          : "Todas as Service Lines";
     }
     if (!_todasAreas.contains(_areaEscolhida)) {
-      _areaEscolhida = _todasAreas.isNotEmpty ? _todasAreas.first : "Todas as Áreas";
+      _areaEscolhida =
+          _todasAreas.isNotEmpty ? _todasAreas.first : "Todas as Áreas";
     }
 
     List<Map<String, dynamic>> badgesVisiveis = _obterBadgesFiltrados();
@@ -206,12 +224,17 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                           if (_idConsultor != -1)
                             OutlinedButton.icon(
                               onPressed: _abrirGaleriaGlobal,
-                              icon: const Icon(Icons.language, size: 14, color: Colors.white),
-                              label: const Text("Ver Galeria", style: TextStyle(color: Colors.white, fontSize: 11)),
+                              icon: const Icon(Icons.language,
+                                  size: 14, color: Colors.white),
+                              label: const Text("Ver Galeria",
+                                  style: TextStyle(
+                                      color: Colors.white, fontSize: 11)),
                               style: OutlinedButton.styleFrom(
                                 side: const BorderSide(color: Colors.white),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 6),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
@@ -248,7 +271,8 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                           // Dropdown Service Line
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
                               decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(10)),
@@ -256,12 +280,16 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                                 child: DropdownButton<String>(
                                   value: _servicoEscolhido,
                                   isExpanded: true,
-                                  icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-                                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                                  icon: const Icon(Icons.keyboard_arrow_down,
+                                      size: 18),
+                                  style: const TextStyle(
+                                      fontSize: 13, color: Colors.black87),
                                   items: _todasServiceLines
                                       .map((s) => DropdownMenuItem(
                                             value: s,
-                                            child: Text(s, overflow: TextOverflow.ellipsis),
+                                            child: Text(s,
+                                                overflow:
+                                                    TextOverflow.ellipsis),
                                           ))
                                       .toList(),
                                   onChanged: (v) {
@@ -278,7 +306,8 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                           // Dropdown Área
                           Expanded(
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
                               decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(10)),
@@ -286,12 +315,16 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                                 child: DropdownButton<String>(
                                   value: _areaEscolhida,
                                   isExpanded: true,
-                                  icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-                                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                                  icon: const Icon(Icons.keyboard_arrow_down,
+                                      size: 18),
+                                  style: const TextStyle(
+                                      fontSize: 13, color: Colors.black87),
                                   items: _todasAreas
                                       .map((a) => DropdownMenuItem(
                                             value: a,
-                                            child: Text(a, overflow: TextOverflow.ellipsis),
+                                            child: Text(a,
+                                                overflow:
+                                                    TextOverflow.ellipsis),
                                           ))
                                       .toList(),
                                   onChanged: (v) {
@@ -324,23 +357,23 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                               onTap: () => _alternarNivel(n),
                               child: Container(
                                 margin: const EdgeInsets.only(right: 15),
-                              width: 40,
-                              height: 40,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: sel ? Colors.white : Colors.white24,
-                                shape: BoxShape.circle,
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: sel ? Colors.white : Colors.white24,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(n,
+                                    style: TextStyle(
+                                        color: sel
+                                            ? const Color(0xFF34659D)
+                                            : Colors.white,
+                                        fontWeight: FontWeight.bold)),
                               ),
-                              child: Text(n,
-                                  style: TextStyle(
-                                      color: sel
-                                          ? const Color(0xFF34659D)
-                                          : Colors.white,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                          );
-                        }).toList(),
-                      ),
+                            );
+                          }).toList(),
+                        ),
                       ),
                     ],
                   ),
@@ -410,7 +443,8 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFF0F0F0),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF34659D), width: 3),
+                    border:
+                        Border.all(color: const Color(0xFF34659D), width: 3),
                     boxShadow: [
                       BoxShadow(
                           color: Colors.blue.withOpacity(0.15),
@@ -419,35 +453,52 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                     ],
                   ),
                   child: ClipOval(
-                    child: badge['urlImagem'] != null && badge['urlImagem'].toString().isNotEmpty
-                      ? (badge['urlImagem'].toString().startsWith('http')
-                          ? Image.network(badge['urlImagem'], fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D)))
-                          : Image.asset('assets/images/${badge['urlImagem']}', fit: BoxFit.cover, errorBuilder: (c,e,s) => const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D))))
-                      : const Icon(Icons.workspace_premium, size: 40, color: Color(0xFF34659D)),
+                    child: ImagemBadgeMobile(
+                      urlImagem: badge['urlImagem']?.toString(),
+                      tamanho: 80,
+                      padding: const EdgeInsets.all(6),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 15),
                 Text("Conquistado a ${_formatarData(badge['data'])}",
-                    style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.bold)),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold)),
                 _widgetExpiracao(badge),
                 const SizedBox(height: 15),
                 Text(badge['titulo'],
                     textAlign: TextAlign.center,
                     style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A1A1A))),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A1A1A))),
                 const SizedBox(height: 8),
                 Text("${badge['sl']}",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF34659D))),
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF34659D))),
                 const SizedBox(height: 4),
-                Text("${badge['area']} - ${badge['nomeNivel'] ?? 'Nível ${badge['nivel']}'}",
+                Text("${badge['area']}",
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 13, color: Colors.blueGrey)),
+                    style:
+                        const TextStyle(fontSize: 13, color: Colors.blueGrey)),
+                const SizedBox(height: 2),
+                Text(_textoNivel(badge),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.blueGrey,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 15),
 
                 // Requisitos e Pontos
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF4F5F9),
                     borderRadius: BorderRadius.circular(10),
@@ -457,17 +508,29 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                     children: [
                       Column(
                         children: [
-                          const Text("Requisitos", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          const Text("Requisitos",
+                              style:
+                                  TextStyle(fontSize: 10, color: Colors.grey)),
                           const SizedBox(height: 2),
-                          Text("${badge['numeroRequisitos'] ?? 0}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87)),
+                          Text("${badge['numeroRequisitos'] ?? 0}",
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black87)),
                         ],
                       ),
                       Container(width: 1, height: 30, color: Colors.black12),
                       Column(
                         children: [
-                          const Text("Pontos", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                          const Text("Pontos",
+                              style:
+                                  TextStyle(fontSize: 10, color: Colors.grey)),
                           const SizedBox(height: 2),
-                          Text("${badge['pontos']}", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF4C51F7))),
+                          Text("${badge['pontos']}",
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF4C51F7))),
                         ],
                       ),
                     ],
@@ -479,7 +542,8 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () => context.push('/badge_detalhe', extra: {'idBadge': badge['id'], 'from': 'meus_badges'}),
+                    onPressed: () => context.push('/badge_detalhe',
+                        extra: {'idBadge': badge['id'], 'from': 'meus_badges'}),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0980E9),
                       shape: RoundedRectangleBorder(
@@ -514,29 +578,47 @@ class _MeusBadgesViewState extends State<MeusBadgesView> {
     if (badge['validadeMeses'] == null || badge['validadeMeses'] == 0) {
       return const Padding(
         padding: EdgeInsets.only(top: 5),
-        child: Text("Premium (Sem expiração)", style: TextStyle(fontSize: 12, color: Color(0xFF34659D), fontWeight: FontWeight.bold)),
+        child: Text("Sem expiração",
+            style: TextStyle(
+                fontSize: 12,
+                color: Colors.green,
+                fontWeight: FontWeight.bold)),
       );
     }
-    
+
     if (badge['dataExpiracao'] != null) {
       try {
         DateTime expiracao = DateTime.parse(badge['dataExpiracao']);
-        int dias = expiracao.difference(DateTime.now()).inDays;
-        
+        int dias = (expiracao.difference(DateTime.now()).inMilliseconds /
+                Duration.millisecondsPerDay)
+            .ceil();
+
         if (dias < 0) {
           return const Padding(
             padding: EdgeInsets.only(top: 5),
-            child: Text("Expirado", style: TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
+            child: Text("Expirado",
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold)),
           );
         } else if (dias < 30) {
           return Padding(
             padding: const EdgeInsets.only(top: 5),
-            child: Text("Expira em $dias dias", style: const TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.bold)),
+            child: Text("Expira em $dias dias",
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold)),
           );
         } else {
           return Padding(
             padding: const EdgeInsets.only(top: 5),
-            child: Text("Expira em $dias dias", style: const TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.bold)),
+            child: Text("Expira em $dias dias",
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold)),
           );
         }
       } catch (e) {

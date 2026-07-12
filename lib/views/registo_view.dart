@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
 import '../services/api_servico.dart';
 import 'package:flutter/gestures.dart';
 import 'package:http/http.dart' as http;
@@ -20,11 +19,21 @@ class _RegistoViewState extends State<RegistoView> {
   final TextEditingController _emailInput = TextEditingController();
   final TextEditingController _senhaInput = TextEditingController();
   final TextEditingController _confirmarSenhaInput = TextEditingController();
+  final TextEditingController _motivacaoInput = TextEditingController();
 
   String? _servicoEscolhido;
   String? _areaEscolhida;
+  List<Map<String, dynamic>> _serviceLines = [];
+  List<Map<String, dynamic>> _areas = [];
+  List<String> _areasDisponiveis = [];
   bool _aceitouTermos = false;
   String _mensagemErro = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarEstrutura();
+  }
 
   @override
   void dispose() {
@@ -32,6 +41,7 @@ class _RegistoViewState extends State<RegistoView> {
     _emailInput.dispose();
     _senhaInput.dispose();
     _confirmarSenhaInput.dispose();
+    _motivacaoInput.dispose();
     super.dispose();
   }
 
@@ -58,6 +68,38 @@ class _RegistoViewState extends State<RegistoView> {
 
   bool _isLoading = false;
 
+  Future<void> _carregarEstrutura() async {
+    try {
+      final res = await http.get(Uri.parse('${ApiServico.baseUrl}/estrutura'));
+      if (res.statusCode != 200) return;
+      final data = jsonDecode(res.body)['data'];
+      if (!mounted) return;
+      setState(() {
+        _serviceLines =
+            List<Map<String, dynamic>>.from(data['serviceLines'] ?? []);
+        _areas = List<Map<String, dynamic>>.from(data['areas'] ?? []);
+      });
+    } catch (_) {
+      // O registo continua utilizável, mas sem opções carregadas até haver ligação.
+    }
+  }
+
+  void _atualizarAreasPorServiceLine(String? nomeServiceLine) {
+    final sl = _serviceLines.firstWhere(
+      (item) => item['nome'] == nomeServiceLine,
+      orElse: () => {},
+    );
+    final slId = sl['id'];
+    _areasDisponiveis = _areas
+        .where((area) => area['slId'] == slId)
+        .map((area) => area['nome'].toString())
+        .toSet()
+        .toList()
+      ..sort();
+    _areaEscolhida =
+        _areasDisponiveis.contains(_areaEscolhida) ? _areaEscolhida : null;
+  }
+
   Future<void> _mostrarTermosRGPD() async {
     showDialog(
       context: context,
@@ -66,21 +108,25 @@ class _RegistoViewState extends State<RegistoView> {
     );
 
     try {
-      final res = await http.get(Uri.parse('${ApiServico.baseUrl}/configuracoes/rgpd'));
+      final res =
+          await http.get(Uri.parse('${ApiServico.baseUrl}/configuracoes/rgpd'));
       if (mounted) Navigator.pop(context); // fechar loading
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body)['data'];
-        final termos = data['RGPD_TERMOS'] ?? 'Termos e condições não definidos.';
-        final politicas = data['RGPD_POLITICAS'] ?? 'Políticas de privacidade não definidas.';
-        
+        final termos =
+            data['RGPD_TERMOS'] ?? 'Termos e condições não definidos.';
+        final politicas =
+            data['RGPD_POLITICAS'] ?? 'Políticas de privacidade não definidas.';
+
         if (mounted) {
           showDialog(
             context: context,
             builder: (c) => AlertDialog(
               title: const Text("Termos e Políticas"),
               content: SingleChildScrollView(
-                child: Text("--- TERMOS E CONDIÇÕES ---\n\n$termos\n\n\n--- POLÍTICAS RGPD ---\n\n$politicas"),
+                child: Text(
+                    "--- TERMOS E CONDIÇÕES ---\n\n$termos\n\n\n--- POLÍTICAS RGPD ---\n\n$politicas"),
               ),
               actions: [
                 TextButton(
@@ -93,13 +139,16 @@ class _RegistoViewState extends State<RegistoView> {
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao carregar políticas.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Erro ao carregar políticas.')));
         }
       }
     } catch (e) {
       if (mounted) Navigator.pop(context); // fechar loading
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sem ligação. Não foi possível carregar as políticas.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Sem ligação. Não foi possível carregar as políticas.')));
       }
     }
   }
@@ -118,7 +167,8 @@ class _RegistoViewState extends State<RegistoView> {
         return;
       }
       if (!_emailEhValido(_emailInput.text)) {
-        setState(() => _mensagemErro = "Introduza um email profissional válido.");
+        setState(
+            () => _mensagemErro = "Introduza um email profissional válido.");
         return;
       }
       if (!_senhaEhForte(_senhaInput.text)) {
@@ -134,26 +184,24 @@ class _RegistoViewState extends State<RegistoView> {
     } else if (_etapaAtual == 2) {
       if (_servicoEscolhido == null ||
           _areaEscolhida == null ||
+          _motivacaoInput.text.trim().isEmpty ||
           !_aceitouTermos) {
-        setState(() => _mensagemErro = "Selecione as áreas e aceite os termos.");
+        setState(() => _mensagemErro =
+            "Selecione as áreas, escreva a motivação e aceite os termos.");
         return;
       }
 
       setState(() => _isLoading = true);
 
-      // Encriptação da Password para envio
-      var bytes = utf8.encode(_senhaInput.text);
-      var digest = sha256.convert(bytes);
-      String passwordEncriptada = digest.toString();
-
       // Montar Payload
       Map<String, dynamic> payload = {
         "nome": _nomeInput.text.trim(),
         "email": _emailInput.text.trim(),
-        "password": passwordEncriptada,
+        "password": _senhaInput.text,
         "perfil": "Consultor", // Na app mobile é forçosamente Consultor
-        "serviceLine": _servicoEscolhido,
-        "area": _areaEscolhida
+        "motivacao": _motivacaoInput.text.trim(),
+        "slRegisto": _servicoEscolhido,
+        "areaRegisto": _areaEscolhida
       };
 
       // Chamada à API
@@ -161,8 +209,9 @@ class _RegistoViewState extends State<RegistoView> {
 
       setState(() {
         _isLoading = false;
-        if (res.containsKey('error') || (res['success'] == false && !res.containsKey('message'))) {
-          _mensagemErro = res['error'] ?? res['message'] ?? "Erro ao registar conta.";
+        if (res.containsKey('error') || res['success'] == false) {
+          _mensagemErro =
+              res['error'] ?? res['message'] ?? "Erro ao registar conta.";
         } else {
           _etapaAtual = 3;
         }
@@ -173,16 +222,18 @@ class _RegistoViewState extends State<RegistoView> {
   @override
   Widget build(BuildContext context) {
     // Altura do azul para o 3/3 ajustada (Imagem da carta)
-    double _alturaAzul =
-        MediaQuery.of(context).size.height * (_etapaAtual == 3 ? 0.35 : 0.25);
+    final alturaAzul = _etapaAtual == 3
+        ? MediaQuery.of(context).size.height * 0.35
+        : (_etapaAtual == 2 ? 170.0 : 155.0);
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: _fundoEspecieBranco,
       body: Stack(
         children: [
           // 1. Fundo Azul
           Container(
-            height: _alturaAzul,
+            height: alturaAzul,
             width: double.infinity,
             color: _azulSoftinsa,
           ),
@@ -246,7 +297,7 @@ class _RegistoViewState extends State<RegistoView> {
           // 3. Imagem da Carta (3/3) - Subimos um pouco (top: _alturaAzul - 100) para não bater no texto
           if (_etapaAtual == 3)
             Positioned(
-              top: _alturaAzul - 100,
+              top: alturaAzul - 100,
               left: 0,
               right: 0,
               child: Image.asset('assets/images/email_icon.png',
@@ -289,7 +340,7 @@ class _RegistoViewState extends State<RegistoView> {
   Widget _passo1() {
     return Column(
       children: [
-        const SizedBox(height: 40),
+        const SizedBox(height: 28),
         _caixaTexto(_nomeInput, "Nome"),
         const SizedBox(height: 20),
         _caixaTexto(_emailInput, "Email Profissional",
@@ -314,17 +365,34 @@ class _RegistoViewState extends State<RegistoView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 40),
+        const SizedBox(height: 52),
         const Text("Service Line",
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        _dropdown(["Hybrid Cloud", "Data & AI", "Mainframe"], _servicoEscolhido,
-            (v) => setState(() => _servicoEscolhido = v)),
-        const SizedBox(height: 30),
+        _dropdown(
+            _serviceLines.map((sl) => sl['nome'].toString()).toList(),
+            _servicoEscolhido,
+            (v) => setState(() {
+                  _servicoEscolhido = v;
+                  _atualizarAreasPorServiceLine(v);
+                })),
+        const SizedBox(height: 22),
         const Text("Área de Interesse",
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        _dropdown(["Lowcode (outsystems)", "DevOps", "Java"], _areaEscolhida,
-            (v) => setState(() => _areaEscolhida = v)),
-        const SizedBox(height: 40),
+        _dropdown(
+          _areasDisponiveis,
+          _areaEscolhida,
+          (v) => setState(() => _areaEscolhida = v),
+          ativo: _servicoEscolhido != null,
+          placeholder: _servicoEscolhido == null
+              ? 'Escolha primeiro a Service Line'
+              : 'Escolha a Área',
+        ),
+        const SizedBox(height: 34),
+        const Text("Motivação",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        const SizedBox(height: 10),
+        _caixaTexto(_motivacaoInput, "Explique brevemente o motivo do registo"),
+        const SizedBox(height: 30),
         GestureDetector(
           onTap: () => setState(() => _aceitouTermos = !_aceitouTermos),
           child: Row(
@@ -339,19 +407,20 @@ class _RegistoViewState extends State<RegistoView> {
               Expanded(
                 child: RichText(
                   text: TextSpan(
-                    style: const TextStyle(fontSize: 15, color: Colors.black87),
-                    children: [
-                      const TextSpan(text: "Eu aceito os "),
-                      TextSpan(
+                      style:
+                          const TextStyle(fontSize: 15, color: Colors.black87),
+                      children: [
+                        const TextSpan(text: "Eu aceito os "),
+                        TextSpan(
                           text: "Termos e Condições",
                           style: const TextStyle(
                               color: Colors.blue,
                               decoration: TextDecoration.underline),
-                          recognizer: TapGestureRecognizer()..onTap = _mostrarTermosRGPD,
-                      ),
-                      const TextSpan(text: " desta App"),
-                    ]
-                  ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = _mostrarTermosRGPD,
+                        ),
+                        const TextSpan(text: " desta App"),
+                      ]),
                 ),
               ),
             ],
@@ -369,18 +438,16 @@ class _RegistoViewState extends State<RegistoView> {
   Widget _passo3() {
     return Column(
       children: [
-        const SizedBox(
-            height:
-                160), // Aumentamos este espaço para o texto "descer" e não bater na carta
+        const SizedBox(height: 190),
         const Text("Quase Tudo Pronto!",
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
         const SizedBox(height: 25),
-        const Text("Enviámos um Email de confirmação\ndo seu Registo!",
+        const Text("O seu pedido de registo foi submetido.",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 16, height: 1.4)),
         const SizedBox(height: 20),
         const Text(
-            "Por favor consulte a sua caixa de Email para confirmar o Registo e começar a utilizar a nova conta",
+            "Só poderá iniciar sessão depois de o administrador aprovar a sua conta. Receberá uma confirmação por email quando o acesso estiver ativo.",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 15, height: 1.4)),
       ],
@@ -406,8 +473,10 @@ class _RegistoViewState extends State<RegistoView> {
     );
   }
 
-  Widget _dropdown(List<String> itens, String? valor, Function(String?) mudar) {
+  Widget _dropdown(List<String> itens, String? valor, Function(String?) mudar,
+      {bool ativo = true, String? placeholder}) {
     return Container(
+      height: 56,
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
       decoration: BoxDecoration(
@@ -415,14 +484,15 @@ class _RegistoViewState extends State<RegistoView> {
           borderRadius: BorderRadius.circular(15),
           boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)]),
       child: DropdownButton<String>(
-        value: valor,
+        value: itens.contains(valor) ? valor : null,
+        hint: Text(placeholder ?? 'Selecione uma opção'),
         isExpanded: true,
         underline: const SizedBox(),
         icon: const Icon(Icons.keyboard_arrow_down, color: Colors.blue),
         items: itens
             .map((e) => DropdownMenuItem(value: e, child: Text(e)))
             .toList(),
-        onChanged: mudar,
+        onChanged: !ativo || itens.isEmpty ? null : mudar,
       ),
     );
   }

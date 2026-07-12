@@ -152,26 +152,66 @@ class _NotificacoesViewState extends State<NotificacoesView> {
   }
 
   Color _obterCor(String tipo) {
-    switch (tipo) {
+    switch (tipo.toLowerCase()) {
+      case 'accepted':
       case 'aprovado':
+      case 'aprovada':
         return Colors.green;
+      case 'rejected':
       case 'rejeitado':
+      case 'recusado':
+      case 'warning':
+      case 'aviso':
         return Colors.red;
+      case 'aviso_global':
+      case 'alerta':
+      case 'devolvido':
+      case 'correcao':
+      case 'correção':
       case 'expiracao':
+      case 'expiração':
         return Colors.orange;
+      case 'badge':
+      case 'pedido':
+        return const Color(0xFF0980E9);
+      case 'system':
+      case 'sistema':
+        return const Color(0xFF713FAA);
       default:
         return const Color(0xFF34659D);
     }
   }
 
   IconData _obterIcone(String tipo) {
-    switch (tipo) {
+    switch (tipo.toLowerCase()) {
+      case 'accepted':
       case 'aprovado':
+      case 'aprovada':
         return Icons.check_circle_outline;
+      case 'rejected':
       case 'rejeitado':
-        return Icons.error_outline;
-      case 'expiracao':
+      case 'recusado':
+        return Icons.cancel_outlined;
+      case 'warning':
+      case 'aviso':
+        return Icons.report_gmailerrorred_outlined;
+      case 'aviso_global':
+      case 'alerta':
         return Icons.warning_amber_rounded;
+      case 'devolvido':
+      case 'correcao':
+      case 'correção':
+        return Icons.assignment_return_outlined;
+      case 'expiracao':
+      case 'expiração':
+        return Icons.warning_amber_rounded;
+      case 'badge':
+        return Icons.workspace_premium_outlined;
+      case 'pedido':
+        return Icons.assignment_outlined;
+      case 'system':
+      case 'sistema':
+        return Icons.settings_outlined;
       default:
         return Icons.notifications_none_outlined;
     }

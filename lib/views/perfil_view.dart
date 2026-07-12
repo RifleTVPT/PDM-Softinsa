@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../components/layout_consultor.dart';
 import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
+import '../components/avatar_utilizador_mobile.dart';
 
 import '../services/api_servico.dart';
 
@@ -48,9 +50,9 @@ class _PerfilViewState extends State<PerfilView> {
   Future<void> _carregarPerfil() async {
     final prefs = await SharedPreferences.getInstance();
     _idUtilizador = prefs.getInt('idUtilizador') ?? 1;
-    
+
     final dados = await BDLocalAjudante().obterPerfil(_idUtilizador);
-    
+
     if (!mounted) return;
     setState(() {
       _perfilData = dados;
@@ -71,7 +73,8 @@ class _PerfilViewState extends State<PerfilView> {
   }
 
   bool _validarPassword(String password) {
-    final regex = RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$');
+    final regex =
+        RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z\d]).{8,}$');
     return regex.hasMatch(password);
   }
 
@@ -89,16 +92,24 @@ class _PerfilViewState extends State<PerfilView> {
   // ==========================================
   void _guardarAlteracoes() async {
     if (_nomeCtrl.text.isEmpty || _emailCtrl.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Preencha todos os campos!")));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Preencha todos os campos!")));
       return;
     }
 
-    final res = await ApiServico().atualizarPerfil(_idUtilizador, _nomeCtrl.text, _emailCtrl.text);
-    
+    final res = await ApiServico()
+        .atualizarPerfil(_idUtilizador, _nomeCtrl.text, _emailCtrl.text);
+
     if (res['success'] == true) {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('nomeCompleto', _nomeCtrl.text);
-      await prefs.setString('email', _emailCtrl.text);
+      final nomeAtualizado =
+          res['data']?['nome']?.toString() ?? _nomeCtrl.text.trim();
+      final emailAtualizado =
+          res['data']?['email']?.toString() ?? _emailCtrl.text.trim();
+      await prefs.setString('nomeCompleto', nomeAtualizado);
+      await prefs.setString('email', emailAtualizado);
+      await BDLocalAjudante().atualizarPerfilUtilizadorLocal(
+          _idUtilizador, nomeAtualizado, emailAtualizado);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -112,6 +123,35 @@ class _PerfilViewState extends State<PerfilView> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(res['message'] ?? "Erro ao guardar.")),
+      );
+    }
+  }
+
+  Future<void> _alterarFotoPerfil() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.image,
+      allowMultiple: false,
+    );
+    final path = result?.files.single.path;
+    if (path == null) return;
+
+    final res = await ApiServico().atualizarAvatar(_idUtilizador, path);
+    if (res['success'] == true) {
+      final novoAvatar = res['avatarUrl']?.toString() ?? '';
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('avatarUrl', novoAvatar);
+      if (!mounted) return;
+      setState(() => _avatarUrl = novoAvatar);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Foto de perfil atualizada com sucesso!"),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message'] ?? "Erro ao atualizar foto.")),
       );
     }
   }
@@ -149,7 +189,8 @@ class _PerfilViewState extends State<PerfilView> {
                   border: OutlineInputBorder()),
             ),
             const SizedBox(height: 10),
-            const Text("Mín. 8 caracteres, 1 maiúscula, 1 minúscula, 1 número e 1 especial (@\$!%*?&).",
+            const Text(
+                "Mín. 8 caracteres, 1 maiúscula, 1 minúscula, 1 número e 1 especial (@\$!%*?&).",
                 style: TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
@@ -161,18 +202,21 @@ class _PerfilViewState extends State<PerfilView> {
           ElevatedButton(
             onPressed: () async {
               if (_novaPwCtrl.text != _confirmaPwCtrl.text) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("As passwords não coincidem.")));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("As passwords não coincidem.")));
                 return;
               }
               if (!_validarPassword(_novaPwCtrl.text)) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Formato de password inválido.")));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Formato de password inválido.")));
                 return;
               }
-              
-              Navigator.pop(context); // Fechar Modal
-              final res = await ApiServico().mudarPassword(_idUtilizador, _pwAtualCtrl.text, _novaPwCtrl.text);
+
+              final res = await ApiServico().mudarPassword(
+                  _idUtilizador, _pwAtualCtrl.text, _novaPwCtrl.text);
               if (res['success'] == true) {
                 if (!mounted) return;
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                     content: Text("Password atualizada com sucesso!"),
                     backgroundColor: Colors.green));
@@ -181,7 +225,10 @@ class _PerfilViewState extends State<PerfilView> {
                 _confirmaPwCtrl.clear();
               } else {
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res['message'] ?? "Erro ao atualizar.")));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(res['message'] ??
+                        "Não foi possível alterar a password. Confirme a password atual."),
+                    backgroundColor: Colors.red));
               }
             },
             style: ElevatedButton.styleFrom(
@@ -216,13 +263,12 @@ class _PerfilViewState extends State<PerfilView> {
                 // 1. MODO MENU: Cabeçalho Grande
                 ? Column(
                     children: [
-                      CircleAvatar(
-                        radius: 45,
+                      AvatarUtilizadorMobile(
+                        nome: _nomeCtrl.text,
+                        foto: _avatarUrl,
+                        raio: 45,
                         backgroundColor: Colors.white,
-                        backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-                        child: _avatarUrl.isEmpty 
-                            ? Text(_obterIniciais(_nomeCtrl.text), style: const TextStyle(color: Color(0xFF34659D), fontSize: 40, fontWeight: FontWeight.bold))
-                            : null,
+                        foregroundColor: const Color(0xFF34659D),
                       ),
                       const SizedBox(height: 15),
                       Text(_nomeCtrl.text,
@@ -232,37 +278,41 @@ class _PerfilViewState extends State<PerfilView> {
                               color: Colors.white)),
                       const SizedBox(height: 5),
                       Text(_emailCtrl.text,
-                          style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 14)),
                       const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                                color: Colors.white24,
-                                borderRadius: BorderRadius.circular(15)),
-                            child: Text(_perfilData?['serviceLine'] ?? 'SLL',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                                color: Colors.orangeAccent.withOpacity(0.8),
-                                borderRadius: BorderRadius.circular(15)),
-                            child: Text(_perfilData?['area'] ?? 'Área',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
-                          ),
-                        ],
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                  color: Colors.white24,
+                                  borderRadius: BorderRadius.circular(15)),
+                              child: Text(_perfilData?['serviceLine'] ?? 'SLL',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12)),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                  color: Colors.orangeAccent.withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(15)),
+                              child: Text(_perfilData?['area'] ?? 'Área',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12)),
+                            ),
+                          ],
+                        ),
                       )
                     ],
                   )
@@ -275,13 +325,12 @@ class _PerfilViewState extends State<PerfilView> {
                         onPressed: () => setState(
                             () => _modoAtual = ModoPerfil.menuPrincipal),
                       ),
-                      CircleAvatar(
-                        radius: 20,
+                      AvatarUtilizadorMobile(
+                        nome: _nomeCtrl.text,
+                        foto: _avatarUrl,
+                        raio: 20,
                         backgroundColor: Colors.white,
-                        backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-                        child: _avatarUrl.isEmpty 
-                            ? Text(_obterIniciais(_nomeCtrl.text), style: const TextStyle(color: Color(0xFF34659D), fontSize: 16, fontWeight: FontWeight.bold))
-                            : null,
+                        foregroundColor: const Color(0xFF34659D),
                       ),
                       const SizedBox(width: 15),
                       Text(
@@ -391,6 +440,28 @@ class _PerfilViewState extends State<PerfilView> {
         const Text("Dados Pessoais",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 15),
+        Center(
+          child: Column(
+            children: [
+              AvatarUtilizadorMobile(
+                nome: _nomeCtrl.text,
+                foto: _avatarUrl,
+                raio: 38,
+                backgroundColor: const Color(0xFFE9F1FA),
+                foregroundColor: const Color(0xFF34659D),
+              ),
+              TextButton.icon(
+                onPressed: _alterarFotoPerfil,
+                icon: const Icon(Icons.photo_camera_outlined,
+                    color: Color(0xFF34659D)),
+                label: const Text("Alterar foto",
+                    style: TextStyle(
+                        color: Color(0xFF34659D), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
         _campoTexto("Nome Completo", _nomeCtrl),
         const SizedBox(height: 15),
         _campoTexto("Endereço de Email", _emailCtrl, isEmail: true),
@@ -410,7 +481,9 @@ class _PerfilViewState extends State<PerfilView> {
           decoration: InputDecoration(
             filled: true,
             fillColor: Colors.grey.shade200,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none),
           ),
         ),
 
@@ -424,7 +497,9 @@ class _PerfilViewState extends State<PerfilView> {
           decoration: InputDecoration(
             filled: true,
             fillColor: Colors.grey.shade200,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none),
           ),
         ),
         const SizedBox(height: 30),
@@ -475,9 +550,18 @@ class _PerfilViewState extends State<PerfilView> {
         const Text("Dúvidas Frequentes (FAQs)",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 15),
-        _faqItem("O que são os Softinsa Badges?", "São uma forma de reconhecimento das suas competências e progressão dentro da Softinsa."),
-        _faqItem("Como posso obter Badges Premium?", "São atribuídos pelo Admin ou pelo seu Manager em contexto de avaliação."),
-        _faqItem("Como faço a candidatura a um Marco?", "Vá ao Catálogo, selecione um Marco, anexe provas e aguarde aprovação."),
+        _faqItem("O que são os Softinsa Badges?",
+            "São reconhecimentos digitais das suas competências, conquistas e evolução profissional dentro da Softinsa."),
+        _faqItem("Como posso obter um badge?",
+            "Abra o catálogo, escolha um badge disponível, envie as evidências pedidas e acompanhe o estado no histórico de pedidos."),
+        _faqItem("O que são badges especiais?",
+            "São conquistas premium atribuídas automaticamente quando cumpre regras como pontos, badges obtidos, posição no ranking ou desempenho numa Service Line."),
+        _faqItem("Posso corrigir uma candidatura?",
+            "Sim. Quando um pedido é devolvido para correção, pode consultar o feedback, ajustar os ficheiros e voltar a submeter."),
+        _faqItem("Onde vejo os meus certificados?",
+            "Abra Meus Badges, entre nos detalhes do badge obtido e use as opções de certificado, galeria pública ou partilha."),
+        _faqItem("Como altero os meus dados?",
+            "Nas Configurações pode atualizar nome, email, password e foto de perfil. A sua Service Line e área são geridas pela organização."),
         const SizedBox(height: 30),
         const Text("Contactos de Suporte",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -486,15 +570,19 @@ class _PerfilViewState extends State<PerfilView> {
           contentPadding: EdgeInsets.zero,
           leading: Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle),
+            decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1), shape: BoxShape.circle),
             child: const Icon(Icons.email_outlined, color: Colors.blue),
           ),
-          title: const Text("Email de Suporte", style: TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: const Text("badges@softinsa.pt"),
+          title: const Text("Email de Suporte",
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: const Text("softinsabadges@gmail.com"),
         ),
         const SizedBox(height: 30),
         const Center(
-          child: Text("Softinsa Badges © 2026\nDesenvolvido com Flutter", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)),
+          child: Text("Softinsa Badges © 2026\nDesenvolvido com Flutter",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey, fontSize: 12)),
         )
       ],
     );
@@ -505,11 +593,13 @@ class _PerfilViewState extends State<PerfilView> {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
-        title: Text(pergunta, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        title: Text(pergunta,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         children: [
           Padding(
             padding: const EdgeInsets.only(bottom: 15),
-            child: Text(resposta, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+            child: Text(resposta,
+                style: const TextStyle(fontSize: 13, color: Colors.black54)),
           )
         ],
       ),

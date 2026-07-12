@@ -99,15 +99,15 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
   }
 
   void _abrirModalCriacao() {
+    final dataCtrl = TextEditingController();
     showDialog(
       context: context,
       builder: (BuildContext ctx) {
-        String modalTitulo = '';
         String modalData = '';
         String modalTipo = 'Progressão de Nível (A-E)';
-        String modalDesc = '';
 
-        return AlertDialog(
+        return StatefulBuilder(
+          builder: (context, setModalState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
           title: const Text("Definir Nova Meta de Evolução", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           content: SingleChildScrollView(
@@ -150,8 +150,10 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
                         lastDate: DateTime(2030),
                       );
                       if (picked != null) {
-                        modalData = "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
-                        // We use a small hack here just to update the text field visually if needed, but since it's an alert dialog, better to manage via stateful builder
+                        setModalState(() {
+                          modalData = "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
+                          dataCtrl.text = modalData;
+                        });
                       }
                     },
                     validator: (value) {
@@ -160,7 +162,7 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
                       return null;
                     },
                     onSaved: (val) => _novaData = modalData,
-                    controller: TextEditingController(text: modalData),
+                    controller: dataCtrl,
                   ),
                   const SizedBox(height: 15),
 
@@ -213,7 +215,7 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
               child: const Text("Ativar Objetivo", style: TextStyle(color: Colors.white)),
             ),
           ],
-        );
+        ));
       }
     );
   }
@@ -278,9 +280,10 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
                     Column(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(8),
+                          width: 32,
+                          height: 32,
                           decoration: BoxDecoration(color: Colors.red.shade50, shape: BoxShape.circle),
-                          child: const Text("🎯", style: TextStyle(fontSize: 16)),
+                          child: const Icon(Icons.track_changes, color: Colors.red, size: 18),
                         ),
                         const SizedBox(height: 5),
                         Text("Total: $total", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
@@ -289,16 +292,26 @@ class _TimelineObjetivosViewState extends State<TimelineObjetivosView> {
                     Container(width: 1, height: 40, color: Colors.grey.shade200),
                     Column(
                       children: [
-                        const Icon(Icons.circle, color: Color(0xFF4C51F7), size: 14),
-                        const SizedBox(height: 10),
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(color: const Color(0xFF4C51F7).withOpacity(0.12), shape: BoxShape.circle),
+                          child: const Icon(Icons.circle, color: Color(0xFF4C51F7), size: 14),
+                        ),
+                        const SizedBox(height: 5),
                         Text("Ativos: ${ativos.length}", style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4C51F7), fontSize: 13)),
                       ],
                     ),
                     Container(width: 1, height: 40, color: Colors.grey.shade200),
                     Column(
                       children: [
-                        const Icon(Icons.circle, color: Colors.green, size: 14),
-                        const SizedBox(height: 10),
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(color: Colors.green.withOpacity(0.12), shape: BoxShape.circle),
+                          child: const Icon(Icons.circle, color: Colors.green, size: 14),
+                        ),
+                        const SizedBox(height: 5),
                         Text("Concluídos: ${concluidos.length}", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 13)),
                       ],
                     ),

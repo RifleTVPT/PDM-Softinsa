@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_servico.dart';
 import '../services/sincronizador.dart';
 
@@ -18,6 +19,35 @@ class _LoginViewState extends State<LoginView> {
 
   // Variável para mostrar se a app está a carregar
   bool _estaACarregar = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mostrarSessaoExpiradaSeNecessario();
+  }
+
+  Future<void> _mostrarSessaoExpiradaSeNecessario() async {
+    final prefs = await SharedPreferences.getInstance();
+    final expirou = prefs.getBool('sessaoExpirada') ?? false;
+    if (!expirou || !mounted) return;
+    await prefs.remove('sessaoExpirada');
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Sessão expirada'),
+        content: const Text(
+            'A sua sessão expirou. Inicie sessão novamente para continuar.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {

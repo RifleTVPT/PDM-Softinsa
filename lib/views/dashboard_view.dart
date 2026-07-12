@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../database/bd_local_ajudante.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/file_validator.dart';
+import '../components/imagem_badge_mobile.dart';
 
 class DashboardView extends StatefulWidget {
   const DashboardView({super.key});
@@ -19,13 +20,18 @@ class _DashboardViewState extends State<DashboardView> {
 
   // VARIÁVEIS DINÂMICAS
   int _badgesObtidos = 0;
-  int _totalBadgesSL = 1;
+  int _badgesObtidosProgresso = 0;
+  int _totalBadgesProgresso = 1;
   List<Map<String, dynamic>> _aprendizagensAtivas = [];
-  
+
   int _pontosTotais = 0;
   int _pontosObtidosEstaSemana = 0;
   int _posicaoRanking = 0;
   int _totalConsultores = 0;
+  int _badgesAnoAtual = 0;
+  int _badgesAnoAnterior = 0;
+  String? _proximoBadgeExpirar;
+  int? _diasProximaExpiracao;
 
   double _meusPontosMedia = 0;
   double _mediaServiceLine = 0;
@@ -46,66 +52,102 @@ class _DashboardViewState extends State<DashboardView> {
       int userId = prefs.getInt('idUtilizador') ?? 1;
 
       Map<String, dynamic> dados = await dbHelper.obterDadosDashboard(userId);
-      List<Map<String, dynamic>> ativasDB = List<Map<String, dynamic>>.from(dados['aprendizagensAtivas']);
-      
+      List<Map<String, dynamic>> ativasDB =
+          List<Map<String, dynamic>>.from(dados['aprendizagensAtivas']);
+
       // Buscar rascunhos locais nas SharedPreferences
-      final chaves = prefs.getKeys().where((k) => k.startsWith('rascunho_candidatura_'));
-      
+      final chaves =
+          prefs.getKeys().where((k) => k.startsWith('rascunho_candidatura_'));
+      final db = await dbHelper.database;
+
       for (String chave in chaves) {
-        int idBadge = int.parse(chave.replaceFirst('rascunho_candidatura_', ''));
+        int? idBadge =
+            int.tryParse(chave.replaceFirst('rascunho_candidatura_', ''));
+        if (idBadge == null) continue;
+
+        final pedidoReal = await db.rawQuery('''
+          SELECT ID_PEDIDO, ESTADO_PEDIDO
+          FROM PEDIDO
+          WHERE ID_UTILIZADOR = ?
+            AND ID_BADGE = ?
+            AND ESTADO_PEDIDO IN ('Pendente', 'Em Análise', 'Em Análise TM', 'Em Análise SLL', 'Aceite', 'Recusado', 'Eliminado')
+          LIMIT 1
+        ''', [userId, idBadge]);
+        if (pedidoReal.isNotEmpty) {
+          await prefs.remove(chave);
+          continue;
+        }
+
         // Verifica se o badge já não está na lista 'ativasDB' (para não haver duplicados)
         if (!ativasDB.any((element) => element['idBadge'] == idBadge)) {
-           // Obter info do badge para preencher a UI
-           Map<String, dynamic>? detalheBadge = await dbHelper.obterBadgeDetalhe(idBadge, userId);
-           if (detalheBadge != null) {
-              List<String> rascunhos = prefs.getStringList(chave) ?? [];
-              if (rascunhos.isNotEmpty) {
-                  Set<String> requisitosMapeados = {};
-                  List<dynamic> requisitosDoBadge = detalheBadge['requisitos'] ?? [];
-                  
-                  for (String rascunhoStr in rascunhos) {
-                    final mapa = jsonDecode(rascunhoStr);
-                    String nome = mapa['name'];
-                    String? reqExtraid = FileValidator.extrairRequisitoDoNome(nome);
-                    if (reqExtraid != null) {
-                      for (var req in requisitosDoBadge) {
-                        String idReq = req['titulo']?.toString() ?? req['id']?.toString() ?? '';
-                        if (idReq.toUpperCase() == reqExtraid.toUpperCase()) {
-                          requisitosMapeados.add(reqExtraid.toUpperCase());
-                          break;
-                        }
-                      }
+          // Obter info do badge para preencher a UI
+          Map<String, dynamic>? detalheBadge =
+              await dbHelper.obterBadgeDetalhe(idBadge, userId);
+          if (detalheBadge != null) {
+            List<String> rascunhos = prefs.getStringList(chave) ?? [];
+            if (rascunhos.isNotEmpty) {
+              Set<String> requisitosMapeados = {};
+              List<dynamic> requisitosDoBadge =
+                  detalheBadge['requisitos'] ?? [];
+
+              for (String rascunhoStr in rascunhos) {
+                final mapa = jsonDecode(rascunhoStr);
+                String nome = mapa['name'];
+                String? reqExtraid = FileValidator.extrairRequisitoDoNome(nome);
+                if (reqExtraid != null) {
+                  for (var req in requisitosDoBadge) {
+                    String tituloReq = req['titulo']?.toString() ?? '';
+                    String idReq = req['id']?.toString() ?? '';
+                    if (FileValidator.textoContemCodigoRequisito(
+                            tituloReq, reqExtraid) ||
+                        FileValidator.textoContemCodigoRequisito(
+                            idReq, reqExtraid)) {
+                      requisitosMapeados.add(reqExtraid.toUpperCase());
+                      break;
                     }
                   }
-
-                  ativasDB.add({
-                    "titulo": detalheBadge['nomeBadge'],
-                    "sl": detalheBadge['serviceLine'],
-                    "area": detalheBadge['area'],
-                    "nivel": detalheBadge['nivel'],
-                    "idBadge": idBadge,
-                    "reqValidados": requisitosMapeados.length, 
-                    "reqTotais": detalheBadge['requisitosTotal'] == 0 ? 1 : detalheBadge['requisitosTotal'],
-                    "estado": "Rascunho",
-                  });
+                }
               }
-           }
+
+              ativasDB.add({
+                "titulo": detalheBadge['titulo'],
+                "sl": detalheBadge['sl'],
+                "area": detalheBadge['area'],
+                "nivel": detalheBadge['nivel'],
+                "urlImagem": detalheBadge['urlImagem'],
+                "idBadge": idBadge,
+                "reqValidados": requisitosMapeados.length,
+                "reqTotais": detalheBadge['requisitosTotal'] == 0
+                    ? 1
+                    : detalheBadge['requisitosTotal'],
+                "estado": "Rascunho",
+              });
+            }
+          }
         }
       }
 
       setState(() {
         _pontosTotais = dados['pontosTotais'];
         _badgesObtidos = dados['badgesObtidos'];
-        _totalBadgesSL = dados['totalBadgesSL'] == 0 ? 1 : dados['totalBadgesSL'];
+        _badgesObtidosProgresso = dados['badgesObtidosProgresso'] ?? 0;
+        _totalBadgesProgresso = (dados['totalBadgesProgresso'] ?? 0) == 0
+            ? 1
+            : dados['totalBadgesProgresso'];
         _posicaoRanking = dados['posicaoRanking'];
         _totalConsultores = dados['totalConsultores'];
         _aprendizagensAtivas = ativasDB;
         _pontosObtidosEstaSemana = dados['pontosObtidosEstaSemana'];
+        _badgesAnoAtual = dados['badgesAnoAtual'] ?? 0;
+        _badgesAnoAnterior = dados['badgesAnoAnterior'] ?? 0;
+        _proximoBadgeExpirar = dados['proximoBadgeExpirar']?.toString();
+        _diasProximaExpiracao = dados['diasProximaExpiracao'];
         _meusPontosMedia = dados['meusPontosMedia'];
         _mediaServiceLine = dados['mediaServiceLine'];
         _mediaEmpresa = dados['mediaEmpresa'];
         if (dados.containsKey('pontosUltimos6Meses')) {
-          _pontosUltimos6Meses = List<Map<String, dynamic>>.from(dados['pontosUltimos6Meses']);
+          _pontosUltimos6Meses =
+              List<Map<String, dynamic>>.from(dados['pontosUltimos6Meses']);
         }
         _isLoading = false;
       });
@@ -117,16 +159,37 @@ class _DashboardViewState extends State<DashboardView> {
 
   // Arredondar a percentagem do gráfico principal (Badges)
   int _calcularPercentagemGlobal() {
-    if (_totalBadgesSL == 0) return 0;
-    double calculo = (_badgesObtidos / _totalBadgesSL) * 100;
-    return calculo.ceil();
+    if (_totalBadgesProgresso == 0) return 0;
+    double calculo = (_badgesObtidosProgresso / _totalBadgesProgresso) * 100;
+    return calculo.round().clamp(0, 100);
   }
 
   // Arredondar a percentagem das aprendizagens (Requisitos)
   int _calcularPercentagemAtiva(int reqValidados, int reqTotais) {
     if (reqTotais == 0) return 0;
     double calculo = (reqValidados / reqTotais) * 100;
-    return calculo.ceil();
+    return calculo.floor();
+  }
+
+  String _textoComparacaoBadges() {
+    if (_badgesAnoAnterior == 0) {
+      return _badgesAnoAtual > 0
+          ? "+$_badgesAnoAtual face ao ano anterior"
+          : "Sem comparação com o ano anterior";
+    }
+    final percentagem =
+        (((_badgesAnoAtual - _badgesAnoAnterior) / _badgesAnoAnterior) * 100)
+            .round();
+    final sinal = percentagem >= 0 ? "+" : "";
+    return "$sinal$percentagem% face ao ano anterior";
+  }
+
+  String _textoProximaExpiracao() {
+    if (_proximoBadgeExpirar == null || _diasProximaExpiracao == null) {
+      return "Nenhum badge prestes a expirar";
+    }
+    final dias = _diasProximaExpiracao!;
+    return dias == 0 ? "Expira hoje" : "Faltam $dias dias";
   }
 
   @override
@@ -134,7 +197,8 @@ class _DashboardViewState extends State<DashboardView> {
     if (_isLoading) {
       return LayoutConsultor(
         indexMenuInferior: 0,
-        corpo: const Center(child: CircularProgressIndicator(color: Color(0xFF34659D))),
+        corpo: const Center(
+            child: CircularProgressIndicator(color: Color(0xFF34659D))),
       );
     }
 
@@ -202,6 +266,35 @@ class _DashboardViewState extends State<DashboardView> {
                                   "#$_posicaoRankingº lugar",
                                   "de $_totalConsultores consultores na empresa",
                                   Icons.emoji_events_outlined,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 15),
+
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: _construirCardInfo(
+                                  "Badges Emitidos",
+                                  "Total obtido",
+                                  _badgesObtidos.toString(),
+                                  _textoComparacaoBadges(),
+                                  Icons.workspace_premium_outlined,
+                                ),
+                              ),
+                              const SizedBox(width: 15),
+                              Expanded(
+                                child: _construirCardInfo(
+                                  "Próxima Expiração",
+                                  "Badge mais próximo",
+                                  _proximoBadgeExpirar ?? "Sem expiração",
+                                  _textoProximaExpiracao(),
+                                  Icons.event_available_outlined,
                                 ),
                               ),
                             ],
@@ -278,7 +371,7 @@ class _DashboardViewState extends State<DashboardView> {
           ),
           const SizedBox(height: 20),
           Text(
-            "Faltam completar ${(_totalBadgesSL - _badgesObtidos)} badges da sua Service Line!",
+            "Faltam completar ${(_totalBadgesProgresso - _badgesObtidosProgresso).clamp(0, _totalBadgesProgresso)} badges da sua Service Line!",
             textAlign: TextAlign.center,
             style: const TextStyle(
                 color: Colors.white, fontSize: 14, fontWeight: FontWeight.w400),
@@ -292,6 +385,7 @@ class _DashboardViewState extends State<DashboardView> {
   Widget _construirCardInfo(
       String titulo, String sub, String valor, String footer, IconData icone) {
     return Container(
+      constraints: const BoxConstraints(minHeight: 150),
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -320,8 +414,10 @@ class _DashboardViewState extends State<DashboardView> {
                       fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               Text(valor,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 18,
+                      fontSize: 17,
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF1A1A1A))),
             ],
@@ -356,6 +452,7 @@ class _DashboardViewState extends State<DashboardView> {
                 aprendizagem['sl'],
                 aprendizagem['area'] ?? '',
                 aprendizagem['nivel'] ?? '',
+                aprendizagem['urlImagem']?.toString(),
                 aprendizagem['idBadge'],
                 aprendizagem['reqValidados'],
                 aprendizagem['reqTotais'],
@@ -368,12 +465,20 @@ class _DashboardViewState extends State<DashboardView> {
 
   // Widget individual para cada Aprendizagem Ativa
   Widget _construirCardAprendizagem(
-      String titulo, String sl, String area, String nivel, int idBadge, int reqValidados, int reqTotais, String estado) {
+      String titulo,
+      String sl,
+      String area,
+      String nivel,
+      String? urlImagem,
+      int idBadge,
+      int reqValidados,
+      int reqTotais,
+      String estado) {
     int percentagemAtiva = _calcularPercentagemAtiva(reqValidados, reqTotais);
 
     return InkWell(
       onTap: () =>
-          context.push('/candidatura?idBadge=$idBadge'), // Ir para as candidaturas ao clicar
+          context.push('/candidatura', extra: {'idBadge': idBadge, 'passo': 3}),
       borderRadius: BorderRadius.circular(15),
       child: Container(
         padding: const EdgeInsets.all(15),
@@ -386,7 +491,7 @@ class _DashboardViewState extends State<DashboardView> {
                 blurRadius: 8,
                 offset: const Offset(0, 3))
           ],
-          border: estado == 'Em Correção' 
+          border: estado == 'Em Correção'
               ? Border.all(color: Colors.orange.withOpacity(0.5), width: 1.5)
               : null,
         ),
@@ -399,8 +504,14 @@ class _DashboardViewState extends State<DashboardView> {
                 color: const Color(0xFFF4F5F9),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.school_outlined,
-                  color: Color(0xFF34659D), size: 28),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: ImagemBadgeMobile(
+                  urlImagem: urlImagem,
+                  tamanho: 44,
+                  padding: const EdgeInsets.all(2),
+                ),
+              ),
             ),
             const SizedBox(width: 15),
 
@@ -438,12 +549,14 @@ class _DashboardViewState extends State<DashboardView> {
 
                   // Texto de requisitos
                   Text(
-                    estado == 'Em Correção' 
-                        ? "Devolvido para Correção" 
-                        : "$reqValidados de $reqTotais ficheiros carregados",
+                    estado == 'Em Correção'
+                        ? "Devolvido para Correção"
+                        : "$reqValidados/$reqTotais requisitos com evidência",
                     style: TextStyle(
                         fontSize: 11,
-                        color: estado == 'Em Correção' ? Colors.orange : Colors.blueGrey,
+                        color: estado == 'Em Correção'
+                            ? Colors.orange
+                            : Colors.blueGrey,
                         fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
@@ -459,7 +572,9 @@ class _DashboardViewState extends State<DashboardView> {
                                 reqTotais == 0 ? 0 : reqValidados / reqTotais,
                             backgroundColor: const Color(0xFFE9EEF2),
                             valueColor: AlwaysStoppedAnimation<Color>(
-                                estado == 'Em Correção' ? Colors.orange : const Color(0xFF0980E9)),
+                                estado == 'Em Correção'
+                                    ? Colors.orange
+                                    : const Color(0xFF0980E9)),
                             minHeight: 6,
                           ),
                         ),
@@ -469,7 +584,9 @@ class _DashboardViewState extends State<DashboardView> {
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: estado == 'Em Correção' ? Colors.orange : const Color(0xFF0980E9))),
+                              color: estado == 'Em Correção'
+                                  ? Colors.orange
+                                  : const Color(0xFF0980E9))),
                     ],
                   ),
                 ],
@@ -531,7 +648,8 @@ class _DashboardViewState extends State<DashboardView> {
   }
 
   // Construtor de barras individuais para o gráfico
-  Widget _barraGrafico(String label, double valor, double maximo, Color cor, {double larguraBarra = 40.0}) {
+  Widget _barraGrafico(String label, double valor, double maximo, Color cor,
+      {double larguraBarra = 40.0}) {
     double alturaMaximaGrafico = 150.0;
     if (maximo == 0) maximo = 1;
     double alturaCalculada = (valor / maximo) * alturaMaximaGrafico;
@@ -567,7 +685,7 @@ class _DashboardViewState extends State<DashboardView> {
   // Gráfico de 6 Meses
   Widget _construirGrafico6Meses() {
     if (_pontosUltimos6Meses.isEmpty) return const SizedBox.shrink();
-    
+
     double maxPontos = 1;
     for (var mes in _pontosUltimos6Meses) {
       if (mes['pontos'] > maxPontos) {
@@ -575,7 +693,20 @@ class _DashboardViewState extends State<DashboardView> {
       }
     }
 
-    final mesesNomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    final mesesNomes = [
+      'Jan',
+      'Fev',
+      'Mar',
+      'Abr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Set',
+      'Out',
+      'Nov',
+      'Dez'
+    ];
 
     return Container(
       width: double.infinity,
@@ -599,20 +730,24 @@ class _DashboardViewState extends State<DashboardView> {
                   fontSize: 16,
                   color: Color(0xFF1A1A1A))),
           const SizedBox(height: 4),
-          const Text("Pontos obtidos nos últimos 6 meses",
+          const Text("Pontos obtidos nos últimos 6 meses (pontos em cada mês)",
               style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 35),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             crossAxisAlignment: CrossAxisAlignment.end,
-            children: _pontosUltimos6Meses.map((mes) {
-              return _barraGrafico(
-                  mesesNomes[mes['mes'] - 1], 
-                  mes['pontos'].toDouble(), 
-                  maxPontos, 
-                  const Color(0xFF0980E9),
-                  larguraBarra: 25.0);
-            }).toList().reversed.toList(),
+            children: _pontosUltimos6Meses
+                .map((mes) {
+                  return _barraGrafico(
+                      mesesNomes[mes['mes'] - 1],
+                      mes['pontos'].toDouble(),
+                      maxPontos,
+                      const Color(0xFF0980E9),
+                      larguraBarra: 25.0);
+                })
+                .toList()
+                .reversed
+                .toList(),
           ),
         ],
       ),

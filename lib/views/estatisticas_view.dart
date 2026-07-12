@@ -17,6 +17,7 @@ class _EstatisticasViewState extends State<EstatisticasView> {
   double _mediaEmpresa = 0;
   int _posicaoRanking = 0;
   int _totalConsultores = 0;
+  List<Map<String, dynamic>> _topRanking = [];
 
   @override
   void initState() {
@@ -29,6 +30,7 @@ class _EstatisticasViewState extends State<EstatisticasView> {
     final idUtilizador = prefs.getInt('idUtilizador') ?? 1;
 
     final dados = await BDLocalAjudante().obterDadosDashboard(idUtilizador);
+    final ranking = await BDLocalAjudante().obterRankingCompleto(idUtilizadorAtual: idUtilizador);
     if (!mounted) return;
     
     setState(() {
@@ -37,6 +39,7 @@ class _EstatisticasViewState extends State<EstatisticasView> {
       _mediaEmpresa = (dados['mediaEmpresa'] ?? 0).toDouble();
       _posicaoRanking = dados['posicaoRanking'] ?? 0;
       _totalConsultores = dados['totalConsultores'] ?? 0;
+      _topRanking = ranking.take(3).toList();
       _isLoading = false;
     });
   }
@@ -347,14 +350,24 @@ class _EstatisticasViewState extends State<EstatisticasView> {
   }
 
   Widget _listaRanking() {
-    final topUsers = [
-      {"pos": 1, "nome": "Ana Martins", "pts": 5800},
-      {"pos": 2, "nome": "Carlos Silva", "pts": 5450},
-      {"pos": 3, "nome": "Ricardo Jorge", "pts": 5100},
-    ];
+    if (_topRanking.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Text(
+          "Sem dados de ranking disponíveis.",
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
 
     return Column(
-      children: topUsers
+      children: _topRanking.asMap().entries
           .map((user) => Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
@@ -367,20 +380,20 @@ class _EstatisticasViewState extends State<EstatisticasView> {
                 ),
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: user['pos'] == 1
+                    backgroundColor: user.key == 0
                         ? const Color(0xFFFFF7CC) // Fundo amarelo muito suave
                         : const Color(0xFFF4F5F9),
-                    child: Text("${user['pos']}º",
+                    child: Text("${user.key + 1}º",
                         style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: user['pos'] == 1
+                            color: user.key == 0
                                 ? const Color(0xFFD48800) // Texto dourado forte
                                 : Colors.black54)),
                   ),
-                  title: Text(user['nome'] as String,
+                  title: Text(user.value['nome']?.toString() ?? 'Consultor',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
-                  trailing: Text("${user['pts']} pts",
+                  trailing: Text("${user.value['pontos'] ?? 0} pts",
                       style: const TextStyle(
                           color: Color(0xFF34659D),
                           fontWeight: FontWeight.bold)),
