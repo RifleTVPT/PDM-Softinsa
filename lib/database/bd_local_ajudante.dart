@@ -4,7 +4,7 @@ import 'package:path/path.dart';
 
 class BDLocalAjudante {
   static const _nomeBD = 'softinsa_badges.db';
-  static const _versaoBD = 7;
+  static const _versaoBD = 8;
 
   static final BDLocalAjudante _instance = BDLocalAjudante._internal();
   static Database? _database;
@@ -54,34 +54,46 @@ class BDLocalAjudante {
           await db.rawQuery('PRAGMA table_info(CONSULTOR)');
       if (!colunasConsultor.any((c) => c['name'] == 'ID_AREA')) {
         await db.execute('ALTER TABLE CONSULTOR ADD COLUMN ID_AREA INTEGER');
-        await db.execute('ALTER TABLE CONSULTOR ADD COLUMN NOTIFICACOES_LIDAS TEXT DEFAULT "[]"');
+        await db.execute(
+            'ALTER TABLE CONSULTOR ADD COLUMN NOTIFICACOES_LIDAS TEXT DEFAULT "[]"');
       }
-
     }
-    
+
     if (oldVersion < 3) {
       final colunasPedido = await db.rawQuery('PRAGMA table_info(PEDIDO)');
       if (!colunasPedido.any((c) => c['name'] == 'IS_SINCRONIZADO')) {
-        await db.execute('ALTER TABLE PEDIDO ADD COLUMN IS_SINCRONIZADO INTEGER DEFAULT 1');
+        await db.execute(
+            'ALTER TABLE PEDIDO ADD COLUMN IS_SINCRONIZADO INTEGER DEFAULT 1');
       }
     }
-    
+
     if (oldVersion < 4) {
-      final colunasObj = await db.rawQuery('PRAGMA table_info(OBJETIVO_TIMELINE)');
+      final colunasObj =
+          await db.rawQuery('PRAGMA table_info(OBJETIVO_TIMELINE)');
       if (!colunasObj.any((c) => c['name'] == 'ID_UTILIZADOR')) {
-        await db.execute('ALTER TABLE OBJETIVO_TIMELINE ADD COLUMN ID_UTILIZADOR INTEGER');
+        await db.execute(
+            'ALTER TABLE OBJETIVO_TIMELINE ADD COLUMN ID_UTILIZADOR INTEGER');
       }
       if (!colunasObj.any((c) => c['name'] == 'TIPO_OBJETIVO')) {
-        await db.execute('ALTER TABLE OBJETIVO_TIMELINE ADD COLUMN TIPO_OBJETIVO TEXT DEFAULT "Outro"');
+        await db.execute(
+            'ALTER TABLE OBJETIVO_TIMELINE ADD COLUMN TIPO_OBJETIVO TEXT DEFAULT "Outro"');
       }
     }
-    
+
     if (oldVersion < 6) {
-      final colunasMarco = await db.rawQuery('PRAGMA table_info(MARCO_CONQUISTA)');
+      final colunasMarco =
+          await db.rawQuery('PRAGMA table_info(MARCO_CONQUISTA)');
       if (!colunasMarco.any((c) => c['name'] == 'TIPO_MARCO')) {
-        await db.execute('ALTER TABLE MARCO_CONQUISTA ADD COLUMN TIPO_MARCO TEXT');
-        await db.execute('ALTER TABLE MARCO_CONQUISTA ADD COLUMN PARAMETRO_1 INTEGER');
-        await db.execute('ALTER TABLE MARCO_CONQUISTA ADD COLUMN PARAMETRO_2 INTEGER');
+        await db
+            .execute('ALTER TABLE MARCO_CONQUISTA ADD COLUMN TIPO_MARCO TEXT');
+        await db.execute(
+            'ALTER TABLE MARCO_CONQUISTA ADD COLUMN PARAMETRO_1 INTEGER');
+        await db.execute(
+            'ALTER TABLE MARCO_CONQUISTA ADD COLUMN PARAMETRO_2 INTEGER');
+      }
+      if (!colunasMarco.any((c) => c['name'] == 'DATA_CRIACAO_MARCO')) {
+        await db.execute(
+            'ALTER TABLE MARCO_CONQUISTA ADD COLUMN DATA_CRIACAO_MARCO TEXT');
       }
     }
 
@@ -93,6 +105,14 @@ class BDLocalAjudante {
           DADOS_JSON TEXT NOT NULL
         )
       ''');
+    }
+
+    if (oldVersion < 8) {
+      final colunasEvidencia =
+          await db.rawQuery('PRAGMA table_info(EVIDENCIA)');
+      if (!colunasEvidencia.any((c) => c['name'] == 'MIME_TYPE')) {
+        await db.execute('ALTER TABLE EVIDENCIA ADD COLUMN MIME_TYPE TEXT');
+      }
     }
   }
 
@@ -153,7 +173,8 @@ class BDLocalAjudante {
         URL_IMAGEM_MARCO TEXT NOT NULL,
         TIPO_MARCO TEXT,
         PARAMETRO_1 INTEGER,
-        PARAMETRO_2 INTEGER
+        PARAMETRO_2 INTEGER,
+        DATA_CRIACAO_MARCO TEXT
       )
     ''');
 
@@ -302,6 +323,7 @@ class BDLocalAjudante {
         NOME_FICHEIRO TEXT NOT NULL,
         REQUISITO_MAPEADO TEXT,
         URL_FICHEIRO TEXT NOT NULL,
+        MIME_TYPE TEXT,
         FOREIGN KEY (ID_PEDIDO) REFERENCES PEDIDO (ID_PEDIDO),
         FOREIGN KEY (ID_REQUISITO) REFERENCES REQUISITO (ID_REQUISITO)
       )
@@ -338,10 +360,18 @@ class BDLocalAjudante {
   // --- MÉTODOS ANALÍTICOS (DASHBOARD) ---
   Future<Map<String, dynamic>> obterDadosDashboard(int idUtilizador) async {
     final db = await database;
+    int diasRestantesAte(DateTime dataExpiracao, DateTime agora) {
+      return (dataExpiracao.difference(agora).inMilliseconds /
+              Duration.millisecondsPerDay)
+          .ceil();
+    }
+
     Map<String, dynamic> dados = {
       'pontosTotais': 0,
       'badgesObtidos': 0,
       'totalBadgesSL': 0,
+      'badgesObtidosProgresso': 0,
+      'totalBadgesProgresso': 0,
       'posicaoRanking': 0,
       'totalConsultores': 0,
       'aprendizagensAtivas': <Map<String, dynamic>>[],
@@ -349,6 +379,10 @@ class BDLocalAjudante {
       'meusPontosMedia': 0.0,
       'mediaServiceLine': 0.0,
       'mediaEmpresa': 0.0,
+      'badgesAnoAtual': 0,
+      'badgesAnoAnterior': 0,
+      'proximoBadgeExpirar': null,
+      'diasProximaExpiracao': null,
     };
 
     // 1. Obter ID_CONSULTOR e Pontos Totais
@@ -364,9 +398,25 @@ class BDLocalAjudante {
     final resultBadges = await db.rawQuery(
         'SELECT COUNT(*) as count FROM CONSULTOR_BADGE WHERE ID_CONSULTOR = ?',
         [idConsultor]);
-    dados['badgesObtidos'] = resultBadges.first['count'] as int;
+    final resultBadgesPremium = await db.rawQuery(
+        'SELECT COUNT(*) as count FROM MARCO_CONSULTOR WHERE ID_CONSULTOR = ?',
+        [idConsultor]);
+    dados['badgesObtidos'] = (resultBadges.first['count'] as int) +
+        (resultBadgesPremium.first['count'] as int);
 
-    // 3. Total de badges normais pertencentes à Service Line do consultor.
+    // 3. Progresso geral: igual ao web, apenas badges normais da Service Line.
+    final resultBadgesObtidosProgresso = await db.rawQuery('''
+      SELECT COUNT(*) as count
+      FROM CONSULTOR_BADGE CB
+      INNER JOIN BADGE B ON B.ID_BADGE = CB.ID_BADGE
+      INNER JOIN NIVEL N ON N.ID_NIVEL = B.ID_NIVEL
+      INNER JOIN AREA A ON A.ID_AREA = N.ID_AREA
+      WHERE CB.ID_CONSULTOR = ?
+        AND A.ID_SERVICE_LINE = (
+          SELECT ID_SERVICE_LINE FROM AREA WHERE ID_AREA = ?
+        )
+        AND B.IS_PREMIUM = 0
+    ''', [idConsultor, resultConsultor.first['ID_AREA']]);
     final resultTotalBadges = await db.rawQuery('''
       SELECT COUNT(*) as count
       FROM BADGE B
@@ -376,53 +426,119 @@ class BDLocalAjudante {
         SELECT ID_SERVICE_LINE FROM AREA WHERE ID_AREA = ?
       ) AND B.IS_PREMIUM = 0
     ''', [resultConsultor.first['ID_AREA']]);
-    dados['totalBadgesSL'] = resultTotalBadges.first['count'] as int;
+    final resultTotalPremium =
+        await db.rawQuery('SELECT COUNT(*) as count FROM MARCO_CONQUISTA');
+    dados['totalBadgesSL'] = (resultTotalBadges.first['count'] as int) +
+        (resultTotalPremium.first['count'] as int);
+    dados['badgesObtidosProgresso'] =
+        resultBadgesObtidosProgresso.first['count'] as int;
+    dados['totalBadgesProgresso'] = resultTotalBadges.first['count'] as int;
 
     final umaSemanaAtras = DateTime.now().subtract(const Duration(days: 7));
     final pontosSemana = await db.rawQuery('''
       SELECT COALESCE(SUM(PONTOS_OBTIDOS), 0) AS total
       FROM HISTORICO_PONTUACAO
       WHERE ID_UTILIZADOR = ? AND DATA_ATRIBUICAO >= ?
-    ''', [
-      idUtilizador,
-      umaSemanaAtras.toIso8601String()
-    ]);
+    ''', [idUtilizador, umaSemanaAtras.toIso8601String()]);
     dados['pontosObtidosEstaSemana'] =
         (pontosSemana.first['total'] as num?)?.toInt() ?? 0;
 
     // 4. Ranking Global
     final resultConsultoresSL = await db.rawQuery('''
-      SELECT C.ID_CONSULTOR, C.PONTUACAO_TOTAL 
+      SELECT C.ID_CONSULTOR, C.PONTUACAO_TOTAL
       FROM CONSULTOR C
+      LEFT JOIN AREA A ON A.ID_AREA = C.ID_AREA
+      WHERE A.ID_SERVICE_LINE = (
+        SELECT ID_SERVICE_LINE FROM AREA WHERE ID_AREA = ?
+      )
       ORDER BY C.PONTUACAO_TOTAL DESC
-    ''');
-    
-    dados['totalConsultores'] = resultConsultoresSL.length;
+    ''', [resultConsultor.first['ID_AREA']]);
 
-    int ranking = 1;
     double somaSL = 0;
     for (var c in resultConsultoresSL) {
-      if (c['ID_CONSULTOR'] == idConsultor) {
-        dados['posicaoRanking'] = ranking;
-      }
       somaSL += (c['PONTUACAO_TOTAL'] as int);
-      ranking++;
     }
-    
     if (resultConsultoresSL.isNotEmpty) {
       dados['mediaServiceLine'] = somaSL / resultConsultoresSL.length;
     }
 
-    final resultAllConsultores = await db.rawQuery('SELECT PONTUACAO_TOTAL FROM CONSULTOR');
+    final resultRankingGlobal = await db.rawQuery('''
+      SELECT C.ID_CONSULTOR, C.PONTUACAO_TOTAL 
+      FROM CONSULTOR C
+      ORDER BY C.PONTUACAO_TOTAL DESC
+    ''');
+
+    dados['totalConsultores'] = resultRankingGlobal.length;
+
+    int ranking = 1;
+    for (var c in resultRankingGlobal) {
+      if (c['ID_CONSULTOR'] == idConsultor) {
+        dados['posicaoRanking'] = ranking;
+      }
+      ranking++;
+    }
+
+    final resultAllConsultores =
+        await db.rawQuery('SELECT PONTUACAO_TOTAL FROM CONSULTOR');
     double somaEmpresa = 0;
-    for(var c in resultAllConsultores) {
+    for (var c in resultAllConsultores) {
       somaEmpresa += (c['PONTUACAO_TOTAL'] as int);
     }
     if (resultAllConsultores.isNotEmpty) {
       dados['mediaEmpresa'] = somaEmpresa / resultAllConsultores.length;
     }
-    
+
     dados['meusPontosMedia'] = (dados['pontosTotais'] as int).toDouble();
+
+    final agora = DateTime.now();
+    final inicioAno = DateTime(agora.year, 1, 1).toIso8601String();
+    final inicioProximoAno = DateTime(agora.year + 1, 1, 1).toIso8601String();
+    final inicioAnoAnterior = DateTime(agora.year - 1, 1, 1).toIso8601String();
+
+    final badgesAnoAtual = await db.rawQuery('''
+      SELECT COUNT(*) AS total
+      FROM CONSULTOR_BADGE
+      WHERE ID_CONSULTOR = ? AND DATA_ATRIBUICAO_BADGE >= ? AND DATA_ATRIBUICAO_BADGE < ?
+    ''', [idConsultor, inicioAno, inicioProximoAno]);
+    final badgesPremiumAnoAtual = await db.rawQuery('''
+      SELECT COUNT(*) AS total
+      FROM MARCO_CONSULTOR
+      WHERE ID_CONSULTOR = ?
+        AND (DATA_CONQUISTA >= ? OR DATA_CONQUISTA IS NULL)
+        AND (DATA_CONQUISTA < ? OR DATA_CONQUISTA IS NULL)
+    ''', [idConsultor, inicioAno, inicioProximoAno]);
+    final badgesAnoAnterior = await db.rawQuery('''
+      SELECT COUNT(*) AS total
+      FROM CONSULTOR_BADGE
+      WHERE ID_CONSULTOR = ? AND DATA_ATRIBUICAO_BADGE >= ? AND DATA_ATRIBUICAO_BADGE < ?
+    ''', [idConsultor, inicioAnoAnterior, inicioAno]);
+    final badgesPremiumAnoAnterior = await db.rawQuery('''
+      SELECT COUNT(*) AS total
+      FROM MARCO_CONSULTOR
+      WHERE ID_CONSULTOR = ? AND DATA_CONQUISTA >= ? AND DATA_CONQUISTA < ?
+    ''', [idConsultor, inicioAnoAnterior, inicioAno]);
+    dados['badgesAnoAtual'] =
+        ((badgesAnoAtual.first['total'] as num?)?.toInt() ?? 0) +
+            ((badgesPremiumAnoAtual.first['total'] as num?)?.toInt() ?? 0);
+    dados['badgesAnoAnterior'] =
+        ((badgesAnoAnterior.first['total'] as num?)?.toInt() ?? 0) +
+            ((badgesPremiumAnoAnterior.first['total'] as num?)?.toInt() ?? 0);
+
+    final proximaExpiracao = await db.rawQuery('''
+      SELECT B.NOME_BADGE, CB.DATA_EXPIRACAO
+      FROM CONSULTOR_BADGE CB
+      INNER JOIN BADGE B ON B.ID_BADGE = CB.ID_BADGE
+      WHERE CB.ID_CONSULTOR = ? AND CB.DATA_EXPIRACAO IS NOT NULL AND CB.DATA_EXPIRACAO > ?
+      ORDER BY CB.DATA_EXPIRACAO ASC
+      LIMIT 1
+    ''', [idConsultor, agora.toIso8601String()]);
+    if (proximaExpiracao.isNotEmpty) {
+      final dataExp = DateTime.tryParse(
+          proximaExpiracao.first['DATA_EXPIRACAO']?.toString() ?? '');
+      dados['proximoBadgeExpirar'] = proximaExpiracao.first['NOME_BADGE'];
+      dados['diasProximaExpiracao'] =
+          dataExp == null ? null : diasRestantesAte(dataExp, agora);
+    }
 
     // 5. Histórico 6 Meses
     List<Map<String, dynamic>> ultimos6Meses = [];
@@ -436,8 +552,12 @@ class BDLocalAjudante {
         WHERE ID_UTILIZADOR = ? 
           AND DATA_ATRIBUICAO >= ? 
           AND DATA_ATRIBUICAO < ?
-      ''', [idUtilizador, mesAlvo.toIso8601String(), mesSeguinte.toIso8601String()]);
-      
+      ''', [
+        idUtilizador,
+        mesAlvo.toIso8601String(),
+        mesSeguinte.toIso8601String()
+      ]);
+
       ultimos6Meses.add({
         'mes': mesAlvo.month,
         'ano': mesAlvo.year,
@@ -450,13 +570,13 @@ class BDLocalAjudante {
     // Inicialmente vamos buscar apenas o que está na DB ("Em Correção").
     // Na vista do Dashboard vamos injetar os rascunhos das SharedPreferences que ainda não são Pedidos.
     final resultAprendizagens = await db.rawQuery('''
-      SELECT B.NOME_BADGE, COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE, A.NOME_AREA, N.NOME_NIVEL, P.ID_PEDIDO, B.ID_BADGE
+      SELECT B.NOME_BADGE, B.URL_IMAGEM, COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE, A.NOME_AREA, N.NOME_NIVEL, P.ID_PEDIDO, P.ESTADO_PEDIDO, B.ID_BADGE
       FROM PEDIDO P 
       INNER JOIN BADGE B ON P.ID_BADGE = B.ID_BADGE 
       LEFT JOIN NIVEL N ON N.ID_NIVEL = B.ID_NIVEL
       LEFT JOIN AREA A ON A.ID_AREA = N.ID_AREA
       LEFT JOIN SERVICE_LINE SL ON SL.ID_SERVICE_LINE = A.ID_SERVICE_LINE
-      WHERE P.ID_UTILIZADOR = ? AND P.ESTADO_PEDIDO = 'Em Correção'
+      WHERE P.ID_UTILIZADOR = ? AND P.ESTADO_PEDIDO IN ('Em Correção', 'Pendente de Correção', 'Rascunho')
     ''', [idUtilizador]);
 
     List<Map<String, dynamic>> ativas = [];
@@ -479,10 +599,11 @@ class BDLocalAjudante {
         "sl": row['SERVICE_LINE'],
         "area": row['NOME_AREA'],
         "nivel": row['NOME_NIVEL'],
+        "urlImagem": row['URL_IMAGEM'],
         "idBadge": idBadge,
         "reqValidados": reqVal,
         "reqTotais": totalReq == 0 ? 1 : totalReq,
-        "estado": "Em Correção",
+        "estado": row['ESTADO_PEDIDO'],
       });
     }
 
@@ -500,18 +621,26 @@ class BDLocalAjudante {
     };
 
     // Obter ID_CONSULTOR
-    final resultConsultor = await db.rawQuery(
-        'SELECT ID_CONSULTOR, ID_AREA FROM CONSULTOR WHERE ID_UTILIZADOR = ?',
-        [idUtilizador]);
+    final resultConsultor = await db.rawQuery('''
+        SELECT C.ID_CONSULTOR, C.ID_AREA, A.NOME_AREA, SL.NOME_SERVICE_LINE
+        FROM CONSULTOR C
+        LEFT JOIN AREA A ON A.ID_AREA = C.ID_AREA
+        LEFT JOIN SERVICE_LINE SL ON SL.ID_SERVICE_LINE = A.ID_SERVICE_LINE
+        WHERE C.ID_UTILIZADOR = ?
+      ''', [idUtilizador]);
 
     int idConsultor = -1;
     if (resultConsultor.isNotEmpty) {
       idConsultor = resultConsultor.first['ID_CONSULTOR'] as int;
+      dadosCatalogo['minhaArea'] = resultConsultor.first['NOME_AREA'];
+      dadosCatalogo['minhaServiceLine'] =
+          resultConsultor.first['NOME_SERVICE_LINE'];
     }
 
     // 1. Obter Todos os Badges (Catálogo completo)
     final resultTodos = await db.rawQuery('''
       SELECT B.ID_BADGE, B.NOME_BADGE, B.PONTOS_BADGE, B.URL_IMAGEM,
+             B.TEMPO_EXPIRACAO_BADGE, B.VALIDADE_MESES,
              N.NOME_NIVEL, N.ORDEM_HIERARQUICA, A.NOME_AREA,
              COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE,
              (SELECT COUNT(*) FROM REQUISITO R WHERE R.ID_BADGE = B.ID_BADGE) AS NUM_REQ,
@@ -536,30 +665,76 @@ class BDLocalAjudante {
         "sl": b['SERVICE_LINE'],
         "area": b['NOME_AREA'],
         "nivel": letraNivel(b['ORDEM_HIERARQUICA'] as int?),
+        "nomeNivel": b['NOME_NIVEL'] ??
+            'Nível ${letraNivel(b['ORDEM_HIERARQUICA'] as int?)}',
         "pontos": b['PONTOS_BADGE'],
         "urlImagem": b['URL_IMAGEM'],
+        "validadeMeses": b['VALIDADE_MESES'] ?? b['TEMPO_EXPIRACAO_BADGE'],
         "numeroRequisitos": b['NUM_REQ'] ?? 0,
         "obtido": (b['OBTIDO'] as int? ?? 0) > 0
       });
     }
     dadosCatalogo['todos'] = todosBadges;
 
-    // 2. Obter Badges Recomendados (Ainda não obtidos, ordenados por pontos)
+    // 2. Obter Badges Recomendados: replica o Dashboard web.
+    // Usa a última interação por CATEGORIA_BADGE e exclui obtidos/pedidos em curso.
     if (idConsultor != -1) {
+      final ultimaInteracao = await db.rawQuery('''
+        SELECT categoria, data_ref FROM (
+          SELECT B.CATEGORIA_BADGE AS categoria,
+                 COALESCE(CB.DATA_ATRIBUICAO_BADGE, '') AS data_ref
+          FROM CONSULTOR_BADGE CB
+          INNER JOIN BADGE B ON B.ID_BADGE = CB.ID_BADGE
+          WHERE CB.ID_CONSULTOR = ?
+          UNION ALL
+          SELECT B.CATEGORIA_BADGE AS categoria,
+                 COALESCE(P.DATA_SUBMISSAO_PEDIDO, '') AS data_ref
+          FROM PEDIDO P
+          INNER JOIN BADGE B ON B.ID_BADGE = P.ID_BADGE
+          WHERE P.ID_UTILIZADOR = ?
+        )
+        WHERE categoria IS NOT NULL AND categoria != ''
+        ORDER BY data_ref DESC
+        LIMIT 1
+      ''', [idConsultor, idUtilizador]);
+
+      if (ultimaInteracao.isEmpty) {
+        return dadosCatalogo;
+      }
+      final categoriaFoco =
+          ultimaInteracao.first['categoria']?.toString() ?? '';
+      String areaFoco = categoriaFoco;
+      final matchArea =
+          RegExp(r'"area"\s*:\s*"([^"]+)"').firstMatch(categoriaFoco);
+      final matchSl =
+          RegExp(r'"serviceLine"\s*:\s*"([^"]+)"').firstMatch(categoriaFoco);
+      if (matchArea != null) {
+        areaFoco = matchArea.group(1) ?? categoriaFoco;
+      } else if (matchSl != null) {
+        areaFoco = matchSl.group(1) ?? categoriaFoco;
+      }
+
       final resultRecomendados = await db.rawQuery('''
         SELECT B.ID_BADGE, B.NOME_BADGE, B.PONTOS_BADGE, B.URL_IMAGEM,
+               B.TEMPO_EXPIRACAO_BADGE, B.VALIDADE_MESES,
                N.NOME_NIVEL, N.ORDEM_HIERARQUICA, A.NOME_AREA,
                COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE,
                (SELECT COUNT(*) FROM REQUISITO R WHERE R.ID_BADGE = B.ID_BADGE) AS NUM_REQ
         FROM BADGE B 
-        INNER JOIN NIVEL N ON N.ID_NIVEL = B.ID_NIVEL
-        INNER JOIN AREA A ON A.ID_AREA = N.ID_AREA
+        LEFT JOIN NIVEL N ON N.ID_NIVEL = B.ID_NIVEL
+        LEFT JOIN AREA A ON A.ID_AREA = N.ID_AREA
         LEFT JOIN SERVICE_LINE SL ON SL.ID_SERVICE_LINE = A.ID_SERVICE_LINE
         WHERE B.ID_BADGE NOT IN (SELECT ID_BADGE FROM CONSULTOR_BADGE WHERE ID_CONSULTOR = ?)
-          AND A.ID_SERVICE_LINE = (SELECT ID_SERVICE_LINE FROM AREA WHERE ID_AREA = ?)
-          AND B.IS_PREMIUM = 0
-        ORDER BY B.PONTOS_BADGE DESC LIMIT 3
-      ''', [idConsultor, resultConsultor.first['ID_AREA']]);
+          AND B.ID_BADGE NOT IN (
+            SELECT ID_BADGE
+            FROM PEDIDO
+            WHERE ID_UTILIZADOR = ?
+              AND ESTADO_PEDIDO IN ('Rascunho', 'Pendente de Correção', 'Pendente', 'Em Análise TM', 'Em Análise SLL')
+          )
+          AND B.CATEGORIA_BADGE LIKE ?
+        ORDER BY N.ORDEM_HIERARQUICA ASC
+        LIMIT 3
+      ''', [idConsultor, idUtilizador, '%$areaFoco%']);
 
       List<Map<String, dynamic>> recomendados = [];
       for (var r in resultRecomendados) {
@@ -569,8 +744,11 @@ class BDLocalAjudante {
           "sl": r['SERVICE_LINE'],
           "area": r['NOME_AREA'],
           "nivel": letraNivel(r['ORDEM_HIERARQUICA'] as int?),
+          "nomeNivel": r['NOME_NIVEL'] ??
+              'Nível ${letraNivel(r['ORDEM_HIERARQUICA'] as int?)}',
           "pontos": r['PONTOS_BADGE'],
           "urlImagem": r['URL_IMAGEM'],
+          "validadeMeses": r['VALIDADE_MESES'] ?? r['TEMPO_EXPIRACAO_BADGE'],
           "numeroRequisitos": r['NUM_REQ'] ?? 0
         });
       }
@@ -584,6 +762,17 @@ class BDLocalAjudante {
   Future<List<Map<String, dynamic>>> obterHistoricoCandidaturas(
       int idUtilizador) async {
     final db = await database;
+    await db.rawDelete('''
+      DELETE FROM PEDIDO
+      WHERE IS_SINCRONIZADO = 0
+        AND ID_UTILIZADOR = ?
+        AND ID_PEDIDO NOT IN (
+          SELECT MAX(ID_PEDIDO)
+          FROM PEDIDO
+          WHERE IS_SINCRONIZADO = 0 AND ID_UTILIZADOR = ?
+          GROUP BY ID_BADGE
+        )
+    ''', [idUtilizador, idUtilizador]);
 
     final result = await db.rawQuery('''
       SELECT P.ID_PEDIDO, B.NOME_BADGE, B.URL_IMAGEM, P.ESTADO_PEDIDO,
@@ -625,16 +814,29 @@ class BDLocalAjudante {
   // --- MÉTODOS PARA OBJETIVOS DA TIMELINE ---
   Future<List<Map<String, dynamic>>> obterObjetivos(int idUtilizador) async {
     final db = await database;
-    return await db.query(
-      'OBJETIVO_TIMELINE', 
-      where: 'ID_UTILIZADOR = ?',
-      whereArgs: [idUtilizador],
-      orderBy: 'DATA_OBJETIVO ASC'
-    );
+    return await db.query('OBJETIVO_TIMELINE',
+        where: 'ID_UTILIZADOR = ?',
+        whereArgs: [idUtilizador],
+        orderBy: 'DATA_OBJETIVO ASC');
   }
 
   Future<int> adicionarObjetivo(Map<String, dynamic> objetivo) async {
     final db = await database;
+    final existentes = await db.query(
+      'OBJETIVO_TIMELINE',
+      where:
+          'ID_UTILIZADOR = ? AND TITULO = ? AND DATA_OBJETIVO = ? AND TIPO_OBJETIVO = ?',
+      whereArgs: [
+        objetivo['ID_UTILIZADOR'],
+        objetivo['TITULO'],
+        objetivo['DATA_OBJETIVO'],
+        objetivo['TIPO_OBJETIVO'],
+      ],
+      limit: 1,
+    );
+    if (existentes.isNotEmpty) {
+      return existentes.first['ID_OBJETIVO'] as int;
+    }
     return await db.insert('OBJETIVO_TIMELINE', objetivo);
   }
 
@@ -642,15 +844,13 @@ class BDLocalAjudante {
     final db = await database;
     final String dataHj = DateTime.now().toIso8601String().split('T')[0];
     return await db.update(
-      'OBJETIVO_TIMELINE',
-      {'STATUS': 'Concluído', 'DATA_CONCLUSAO': dataHj},
-      where: 'ID_OBJETIVO = ?',
-      whereArgs: [idObjetivo]
-    );
+        'OBJETIVO_TIMELINE', {'STATUS': 'Concluído', 'DATA_CONCLUSAO': dataHj},
+        where: 'ID_OBJETIVO = ?', whereArgs: [idObjetivo]);
   }
 
   // --- MÉTODOS FILA DE SINCRONIZAÇÃO DE OBJETIVOS ---
-  Future<int> adicionarFilaSincronizacaoObjetivo(String tipoAcao, Map<String, dynamic> dados) async {
+  Future<int> adicionarFilaSincronizacaoObjetivo(
+      String tipoAcao, Map<String, dynamic> dados) async {
     final db = await database;
     return await db.insert('FILA_SINCRONIZACAO_OBJETIVOS', {
       'TIPO_ACAO': tipoAcao,
@@ -660,26 +860,29 @@ class BDLocalAjudante {
 
   Future<List<Map<String, dynamic>>> obterFilaSincronizacaoObjetivos() async {
     final db = await database;
-    return await db.query('FILA_SINCRONIZACAO_OBJETIVOS', orderBy: 'ID_FILA ASC');
+    return await db.query('FILA_SINCRONIZACAO_OBJETIVOS',
+        orderBy: 'ID_FILA ASC');
   }
 
   Future<int> limparFilaSincronizacaoObjetivos(List<int> ids) async {
     if (ids.isEmpty) return 0;
     final db = await database;
-    return await db.delete('FILA_SINCRONIZACAO_OBJETIVOS', where: 'ID_FILA IN (${ids.join(',')})');
+    return await db.delete('FILA_SINCRONIZACAO_OBJETIVOS',
+        where: 'ID_FILA IN (${ids.join(',')})');
   }
 
   // --- MÉTODOS PARA ESTATÍSTICAS E RANKING ---
-  Future<Map<String, dynamic>> obterEstatisticasConsultor(int idUtilizador) async {
+  Future<Map<String, dynamic>> obterEstatisticasConsultor(
+      int idUtilizador) async {
     final db = await database;
-    
+
     // Obter dados do consultor
     final consResult = await db.rawQuery('''
       SELECT C.PONTUACAO_TOTAL, 
              (SELECT COUNT(*) FROM CONSULTOR_BADGE CB WHERE CB.ID_CONSULTOR = C.ID_CONSULTOR) as TOTAL_BADGES
       FROM CONSULTOR C WHERE C.ID_UTILIZADOR = ?
     ''', [idUtilizador]);
-    
+
     int meusPontos = 0;
     int meusBadges = 0;
     if (consResult.isNotEmpty) {
@@ -688,32 +891,26 @@ class BDLocalAjudante {
     }
 
     // Calcular Posição Ranking
-    final rankResult = await db.rawQuery('SELECT ID_UTILIZADOR, PONTUACAO_TOTAL FROM CONSULTOR ORDER BY PONTUACAO_TOTAL DESC');
-    int myRank = rankResult.indexWhere((r) => r['ID_UTILIZADOR'] == idUtilizador) + 1;
+    final rankingCompleto =
+        await obterRankingCompleto(idUtilizadorAtual: idUtilizador);
+    int myRank = rankingCompleto.indexWhere((r) => r['isMe'] == true) + 1;
     if (myRank == 0) myRank = 1;
-    int totalUsers = rankResult.length > 0 ? rankResult.length : 1;
-    
+    int totalUsers = rankingCompleto.isNotEmpty ? rankingCompleto.length : 1;
+
     int percentagemCatalogo = (meusBadges / 30 * 100).clamp(0, 100).toInt();
 
     // Fallback Mock de Gráficos (Offline)
     List<String> mesesLabels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun"];
     List<int> dadosLinha = [
-      (meusPontos * 0.5).round(), (meusPontos * 0.6).round(), (meusPontos * 0.7).round(),
-      (meusPontos * 0.85).round(), (meusPontos * 0.95).round(), meusPontos
+      (meusPontos * 0.5).round(),
+      (meusPontos * 0.6).round(),
+      (meusPontos * 0.7).round(),
+      (meusPontos * 0.85).round(),
+      (meusPontos * 0.95).round(),
+      meusPontos
     ];
     List<int> normais = [0, 1, 1, 2];
     List<int> especiais = [0, 0, 1, 0];
-
-    // Ranking Mock (Offline Fallback)
-    final top5 = rankResult.take(5).map((r) => {
-      'pos': rankResult.indexOf(r) + 1,
-      'nome': 'Consultor ID ${r['ID_UTILIZADOR']}',
-      'pontos': r['PONTUACAO_TOTAL'],
-      'badges': 0,
-      'serviceLine': 'Offline',
-      'area': 'Offline',
-      'isMe': r['ID_UTILIZADOR'] == idUtilizador
-    }).toList();
 
     return {
       'kpis': {
@@ -723,31 +920,21 @@ class BDLocalAjudante {
         'crescimentoPontos': "+0",
         'percentagemBadges': percentagemCatalogo,
       },
-      'graficoLinha': {
-        'labels': mesesLabels,
-        'data': dadosLinha
-      },
+      'graficoLinha': {'labels': mesesLabels, 'data': dadosLinha},
       'graficoBarras': {
         'labels': mesesLabels.sublist(2),
         'normais': normais,
         'especiais': especiais
       },
-      'top5': top5,
-      'rankingCompleto': rankResult.map((r) => {
-        'pos': rankResult.indexOf(r) + 1,
-        'nome': 'Consultor ID ${r['ID_UTILIZADOR']}',
-        'pontos': r['PONTUACAO_TOTAL'],
-        'badges': 0,
-        'serviceLine': 'Offline',
-        'area': 'Offline',
-        'isMe': r['ID_UTILIZADOR'] == idUtilizador
-      }).toList()
+      'top5': rankingCompleto.take(5).toList(),
+      'rankingCompleto': rankingCompleto
     };
   }
 
-  Future<List<Map<String, dynamic>>> obterRankingCompleto() async {
+  Future<List<Map<String, dynamic>>> obterRankingCompleto(
+      {int? idUtilizadorAtual}) async {
     final db = await database;
-    
+
     final result = await db.rawQuery('''
       SELECT U.ID_UTILIZADOR, U.NOME_COMPLETO_UTILIZADOR as nome, C.PONTUACAO_TOTAL as pontos,
              COALESCE(SL.NOME_SERVICE_LINE, 'Sem SL') as serviceLine,
@@ -759,14 +946,16 @@ class BDLocalAjudante {
       LEFT JOIN SERVICE_LINE SL ON A.ID_SERVICE_LINE = SL.ID_SERVICE_LINE
       ORDER BY C.PONTUACAO_TOTAL DESC
     ''');
-    
+
     List<Map<String, dynamic>> ranking = [];
     for (int i = 0; i < result.length; i++) {
       var r = Map<String, dynamic>.from(result[i]);
       r['pos'] = i + 1;
+      r['isMe'] =
+          idUtilizadorAtual != null && r['ID_UTILIZADOR'] == idUtilizadorAtual;
       ranking.add(r);
     }
-    
+
     return ranking;
   }
 
@@ -826,12 +1015,13 @@ class BDLocalAjudante {
   }
 
   // --- MÉTODOS DETALHES DO BADGE ---
-  Future<Map<String, dynamic>?> obterBadgeDetalhe(int idBadge, int idUtilizador) async {
+  Future<Map<String, dynamic>?> obterBadgeDetalhe(
+      int idBadge, int idUtilizador) async {
     final db = await database;
 
     // 1. Obter Badge base
     final resultBadge = await db.rawQuery('''
-      SELECT B.*, N.NOME_NIVEL, A.NOME_AREA,
+      SELECT B.*, N.NOME_NIVEL, N.ORDEM_HIERARQUICA, A.NOME_AREA,
              COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE
       FROM BADGE B
       LEFT JOIN NIVEL N ON B.ID_NIVEL = N.ID_NIVEL
@@ -843,12 +1033,20 @@ class BDLocalAjudante {
     if (resultBadge.isEmpty) return null;
     final row = resultBadge.first;
 
+    String letraNivel(int? ordem) {
+      if (ordem == null || ordem < 1) return 'A';
+      return String.fromCharCode(64 + ordem);
+    }
+
+    final letra = letraNivel(row['ORDEM_HIERARQUICA'] as int?);
+
     Map<String, dynamic> detalhe = {
       "id": row['ID_BADGE'],
       "titulo": row['NOME_BADGE'],
       "sl": row['SERVICE_LINE'],
       "area": row['NOME_AREA'] ?? '',
-      "nivel": row['NOME_NIVEL'] ?? 'A',
+      "nivel": letra,
+      "nomeNivel": row['NOME_NIVEL'] ?? 'Nível $letra',
       "descricao": row['DESCRICAO_BADGE'] ?? '',
       "pontos": row['PONTOS_BADGE'],
       "urlImagem": row['URL_IMAGEM'],
@@ -865,7 +1063,7 @@ class BDLocalAjudante {
     final resultConsultor = await db.rawQuery(
         'SELECT ID_CONSULTOR FROM CONSULTOR WHERE ID_UTILIZADOR = ?',
         [idUtilizador]);
-    
+
     if (resultConsultor.isNotEmpty) {
       int idConsultor = resultConsultor.first['ID_CONSULTOR'] as int;
       final resultObtido = await db.rawQuery('''
@@ -887,14 +1085,14 @@ class BDLocalAjudante {
       WHERE ID_UTILIZADOR = ? AND ID_BADGE = ? 
       ORDER BY DATA_SUBMISSAO_PEDIDO DESC LIMIT 1
     ''', [idUtilizador, idBadge]);
-    
+
     if (resultPedido.isNotEmpty) {
       detalhe['estadoPedido'] = resultPedido.first['ESTADO_PEDIDO'];
     }
 
     // 3. Requisitos
     final resultReq = await db.rawQuery('''
-      SELECT ID_REQUISITO, TITULO_REQUISITO, DESCRICAO_REQUISITO 
+      SELECT ID_REQUISITO, TITULO_REQUISITO, DESCRICAO_REQUISITO, ORDEM_REQUISITO
       FROM REQUISITO 
       WHERE ID_BADGE = ?
       ORDER BY ORDEM_REQUISITO ASC
@@ -907,7 +1105,9 @@ class BDLocalAjudante {
         "id": req['ID_REQUISITO'],
         "titulo": req['TITULO_REQUISITO'],
         "desc": req['DESCRICAO_REQUISITO'],
-        "concluido": detalhe['obtido'], // Simplificação: se tem o badge, estão concluídos
+        "ordem": req['ORDEM_REQUISITO'],
+        "concluido": detalhe[
+            'obtido'], // Simplificação: se tem o badge, estão concluídos
       });
     }
     detalhe['requisitos'] = reqs;
@@ -916,9 +1116,10 @@ class BDLocalAjudante {
   }
 
   // Obter evidencias submetidas pelo utilizador para aquele Badge (Aprovado)
-  Future<List<Map<String, dynamic>>> obterEvidenciasDePedidoAprovado(int idBadge, int idUtilizador) async {
+  Future<List<Map<String, dynamic>>> obterEvidenciasDePedidoAprovado(
+      int idBadge, int idUtilizador) async {
     final db = await database;
-    
+
     // Obter o pedido aprovado para aquele badge e utilizador
     final resultPedido = await db.rawQuery('''
       SELECT ID_PEDIDO FROM PEDIDO 
@@ -931,7 +1132,8 @@ class BDLocalAjudante {
     int idPedido = resultPedido.first['ID_PEDIDO'] as int;
 
     // Obter as evidencias
-    final resultEvidencias = await db.query('EVIDENCIA', where: 'ID_PEDIDO = ?', whereArgs: [idPedido]);
+    final resultEvidencias = await db
+        .query('EVIDENCIA', where: 'ID_PEDIDO = ?', whereArgs: [idPedido]);
     return resultEvidencias;
   }
 
@@ -973,12 +1175,32 @@ class BDLocalAjudante {
     return {};
   }
 
+  Future<int> atualizarPerfilUtilizadorLocal(
+      int idUtilizador, String nome, String email) async {
+    final db = await database;
+    return await db.update(
+      'UTILIZADOR',
+      {
+        'NOME_COMPLETO_UTILIZADOR': nome,
+        'EMAIL_UTILIZADOR': email,
+      },
+      where: 'ID_UTILIZADOR = ?',
+      whereArgs: [idUtilizador],
+    );
+  }
+
   Future<List<Map<String, dynamic>>> obterNotificacoes(int idUtilizador) async {
     final db = await database;
-    return await db.query(
-      'NOTIFICACAO',
-      orderBy: 'DATA_ENVIO_NOTIFICACAO DESC'
-    );
+    final rows =
+        await db.query('NOTIFICACAO', orderBy: 'DATA_ENVIO_NOTIFICACAO DESC');
+    final vistos = <String>{};
+    final unicas = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final chave =
+          '${row['TITULO_NOTIFICACAO']}|${row['MENSAGEM_NOTIFICACAO']}|${row['DATA_ENVIO_NOTIFICACAO']}';
+      if (vistos.add(chave)) unicas.add(row);
+    }
+    return unicas;
   }
 
   // --- MÉTODOS DE GAMIFICAÇÃO ---
@@ -987,10 +1209,13 @@ class BDLocalAjudante {
     return await db.query('OBJETIVO_TIMELINE', orderBy: 'DATA_OBJETIVO DESC');
   }
 
-  Future<List<Map<String, dynamic>>> obterConquistasEspeciais(int idUtilizador) async {
+  Future<List<Map<String, dynamic>>> obterConquistasEspeciais(
+      int idUtilizador) async {
     final db = await database;
     return await db.rawQuery('''
-      SELECT MC.ID_MARCO, MC.TITULO_MARCO, MC.DESCRICAO_MARCO, MC.PONTOS_EXTRA, MC.URL_IMAGEM_MARCO, MC.REGRA_ATRIBUICAO, C.DATA_CONQUISTA
+      SELECT MC.ID_MARCO, MC.TITULO_MARCO, MC.DESCRICAO_MARCO, MC.PONTOS_EXTRA,
+             MC.URL_IMAGEM_MARCO, MC.REGRA_ATRIBUICAO, MC.TIPO_MARCO,
+             MC.PARAMETRO_1, MC.PARAMETRO_2, C.DATA_CONQUISTA
       FROM MARCO_CONQUISTA MC
       INNER JOIN MARCO_CONSULTOR C ON MC.ID_MARCO = C.ID_MARCO
       INNER JOIN CONSULTOR CO ON C.ID_CONSULTOR = CO.ID_CONSULTOR
@@ -998,14 +1223,13 @@ class BDLocalAjudante {
     ''', [idUtilizador]);
   }
 
-  Future<List<Map<String, dynamic>>> obterHistoricoPontos(int idUtilizador) async {
+  Future<List<Map<String, dynamic>>> obterHistoricoPontos(
+      int idUtilizador) async {
     final db = await database;
-    return await db.query(
-      'HISTORICO_PONTUACAO',
-      where: 'ID_UTILIZADOR = ?',
-      whereArgs: [idUtilizador],
-      orderBy: 'DATA_ATRIBUICAO DESC'
-    );
+    return await db.query('HISTORICO_PONTUACAO',
+        where: 'ID_UTILIZADOR = ?',
+        whereArgs: [idUtilizador],
+        orderBy: 'DATA_ATRIBUICAO DESC');
   }
 
   // --- MÉTODOS DE PEDIDO ---
@@ -1013,6 +1237,7 @@ class BDLocalAjudante {
     final db = await database;
     final result = await db.rawQuery('''
       SELECT P.ID_PEDIDO, P.ESTADO_PEDIDO, P.DATA_ULTIMA_ATUALIZACAO, P.DATA_SUBMISSAO_PEDIDO, P.COMENTARIO_CONSULTOR, P.IS_SINCRONIZADO,
+             B.ID_BADGE,
              B.NOME_BADGE, B.URL_IMAGEM, B.IS_PREMIUM, B.PONTOS_BADGE, B.VALIDADE_MESES,
              N.NOME_NIVEL, A.NOME_AREA, COALESCE(SL.NOME_SERVICE_LINE, B.CATEGORIA_BADGE) AS SERVICE_LINE,
              (SELECT COUNT(*) FROM REQUISITO R WHERE R.ID_BADGE = B.ID_BADGE) AS NUM_REQ
@@ -1040,7 +1265,8 @@ class BDLocalAjudante {
     return pedido;
   }
 
-  Future<Map<String, dynamic>?> obterUltimoPedidoCandidatura(int idUtilizador) async {
+  Future<Map<String, dynamic>?> obterUltimoPedidoCandidatura(
+      int idUtilizador) async {
     final db = await database;
     final result = await db.rawQuery('''
       SELECT P.ID_PEDIDO, B.NOME_BADGE, B.URL_IMAGEM, B.PONTOS_BADGE, P.ESTADO_PEDIDO,
@@ -1050,7 +1276,7 @@ class BDLocalAjudante {
       LEFT JOIN NIVEL N ON B.ID_NIVEL = N.ID_NIVEL
       LEFT JOIN AREA A ON A.ID_AREA = N.ID_AREA
       LEFT JOIN SERVICE_LINE SL ON SL.ID_SERVICE_LINE = A.ID_SERVICE_LINE
-      WHERE P.ID_UTILIZADOR = ? AND P.ESTADO_PEDIDO NOT IN ('Rascunho', 'Em Correção')
+      WHERE P.ID_UTILIZADOR = ? AND P.ESTADO_PEDIDO NOT IN ('Rascunho', 'Em Correção', 'Eliminado')
       ORDER BY P.DATA_SUBMISSAO_PEDIDO DESC LIMIT 1
     ''', [idUtilizador]);
 
@@ -1058,7 +1284,8 @@ class BDLocalAjudante {
     return result.first;
   }
 
-  Future<List<Map<String, dynamic>>> obterMarcosDisponiveis(int idUtilizador) async {
+  Future<List<Map<String, dynamic>>> obterMarcosDisponiveis(
+      int idUtilizador) async {
     final db = await database;
     return await db.rawQuery('''
       SELECT MC.*
