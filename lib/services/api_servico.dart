@@ -61,8 +61,14 @@ class ApiServico {
           'idUtilizador',
           (utilizador['ID_UTILIZADOR'] as num).toInt(),
         );
-        await prefs.setString('nomeCompleto', utilizador['NOME_COMPLETO_UTILIZADOR']?.toString() ?? 'Consultor Softinsa');
-        await prefs.setString('email', utilizador['EMAIL_UTILIZADOR']?.toString() ?? 'consultor@softinsa.pt');
+        await prefs.setString(
+            'nomeCompleto',
+            utilizador['NOME_COMPLETO_UTILIZADOR']?.toString() ??
+                'Consultor Softinsa');
+        await prefs.setString(
+            'email',
+            utilizador['EMAIL_UTILIZADOR']?.toString() ??
+                'consultor@softinsa.pt');
         String avatar = utilizador['URL_FOTO']?.toString() ?? '';
         if (avatar == 'null') avatar = '';
         await prefs.setString('avatarUrl', avatar);
@@ -101,6 +107,10 @@ class ApiServico {
       if (response.statusCode == 200) {
         final corpo = jsonDecode(response.body) as Map<String, dynamic>;
         return Map<String, dynamic>.from(corpo['data'] as Map);
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        await terminarSessao();
+        print("Sessão mobile terminada: conta sem autorização de consultor.");
+        return null;
       } else {
         print("Erro na API ao sincronizar: Código ${response.statusCode}");
         return null;
@@ -133,20 +143,31 @@ class ApiServico {
   }
 
   // ENVIAR DADOS (SUBMETER CANDIDATURAS / PEDIDOS OFFLINE)
-  Future<bool> enviarPedido(Map<String, dynamic> pedidoMap) async {
+  Future<Map<String, dynamic>> enviarPedidoResposta(
+      Map<String, dynamic> pedidoMap) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/mobile/pedidos'),
-        body: jsonEncode(pedidoMap),
-        headers: await _cabecalhosAutenticados(),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/mobile/pedidos'),
+            body: jsonEncode(pedidoMap),
+            headers: await _cabecalhosAutenticados(),
+          )
+          .timeout(const Duration(seconds: 90));
 
-      // Código 201 significa "Created" (Criado com sucesso no servidor)
-      return response.statusCode == 201;
+      final body = jsonDecode(response.body);
+      return {
+        'success': response.statusCode == 201 && body['success'] != false,
+        ...Map<String, dynamic>.from(body),
+      };
     } catch (e) {
       print('Erro ao enviar pedido para a API: $e');
-      return false;
+      return {'success': false, 'message': 'Sem ligação ao servidor.'};
     }
+  }
+
+  Future<bool> enviarPedido(Map<String, dynamic> pedidoMap) async {
+    final resultado = await enviarPedidoResposta(pedidoMap);
+    return resultado['success'] == true;
   }
 
   Future<void> registarFcmToken(String token) async {
@@ -174,10 +195,10 @@ class ApiServico {
     }
   }
 
-  Future<Map<String, dynamic>> recuperarPassword(String email) async {
+  Future<Map<String, dynamic>> verificarEmailRecuperacao(String email) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/users/forgot-password'),
+        Uri.parse('$baseUrl/users/verificar-email-recuperacao'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': email}),
       );
@@ -187,12 +208,31 @@ class ApiServico {
     }
   }
 
-  Future<Map<String, dynamic>> atualizarPerfil(int id, String nome, String email) async {
+  Future<Map<String, dynamic>> recuperarPassword(
+      String email, String novaPassword, String confirmarPassword) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/users/recuperar-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'novaPassword': novaPassword,
+          'confirmarPassword': confirmarPassword,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'error': 'Sem ligação ao servidor.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> atualizarPerfil(
+      int id, String nome, String email) async {
     try {
       final response = await http.put(
-        Uri.parse('$baseUrl/users/update/$id'),
+        Uri.parse('$baseUrl/users/configuracoes/$id'),
         headers: await _cabecalhosAutenticados(),
-        body: jsonEncode({'NOME_COMPLETO_UTILIZADOR': nome, 'EMAIL_UTILIZADOR': email}),
+        body: jsonEncode({'nome': nome, 'email': email}),
       );
       return jsonDecode(response.body);
     } catch (e) {
@@ -200,14 +240,39 @@ class ApiServico {
     }
   }
 
-  Future<Map<String, dynamic>> mudarPassword(int id, String passwordAtual, String novaPassword) async {
+  Future<Map<String, dynamic>> mudarPassword(
+      int id, String passwordAtual, String novaPassword) async {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl/users/mudar-password/$id'),
         headers: await _cabecalhosAutenticados(),
-        body: jsonEncode({'passwordAtual': passwordAtual, 'novaPassword': novaPassword}),
+        body: jsonEncode(
+            {'passwordAtual': passwordAtual, 'novaPassword': novaPassword}),
       );
       return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Sem ligação ao servidor.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> atualizarAvatar(
+      int id, String caminhoFicheiro) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('jwtToken');
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/users/upload-avatar/$id'),
+      );
+      if (token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+      request.files
+          .add(await http.MultipartFile.fromPath('avatar', caminhoFicheiro));
+
+      final response = await request.send();
+      final body = await response.stream.bytesToString();
+      return jsonDecode(body);
     } catch (e) {
       return {'success': false, 'message': 'Sem ligação ao servidor.'};
     }
@@ -234,7 +299,8 @@ class ApiServico {
     }
   }
 
-  Future<Map<String, dynamic>?> fetchEstatisticasConsultor(int idUtilizador) async {
+  Future<Map<String, dynamic>?> fetchEstatisticasConsultor(
+      int idUtilizador) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/estatisticas/consultor/$idUtilizador'),
@@ -265,7 +331,8 @@ class ApiServico {
 
   Future<bool> marcarNotificacaoComoLida(int idNotificacao) async {
     try {
-      final response = await http.put(Uri.parse('$baseUrl/notificacoes/$idNotificacao/read'));
+      final response = await http
+          .put(Uri.parse('$baseUrl/notificacoes/$idNotificacao/read'));
       return response.statusCode == 200;
     } catch (e) {
       return false;
@@ -274,7 +341,8 @@ class ApiServico {
 
   Future<bool> marcarTodasNotificacoesComoLidas(int idUtilizador) async {
     try {
-      final response = await http.put(Uri.parse('$baseUrl/notificacoes/user/$idUtilizador/read-all'));
+      final response = await http
+          .put(Uri.parse('$baseUrl/notificacoes/user/$idUtilizador/read-all'));
       return response.statusCode == 200;
     } catch (e) {
       return false;

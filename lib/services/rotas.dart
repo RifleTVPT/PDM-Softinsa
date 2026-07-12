@@ -51,7 +51,10 @@ GoRouter criarRouter(String rotaInicial) {
           path: '/candidatura',
           builder: (context, state) {
             final args = state.extra as Map<String, dynamic>? ?? {};
-            return CandidaturaView(idBadge: args['idBadge']);
+            return CandidaturaView(
+              idBadge: args['idBadge'],
+              passoInicial: args['passo'],
+            );
           }),
       GoRoute(
           name: 'meus_badges',

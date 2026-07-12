@@ -1,7 +1,26 @@
 import 'dart:io';
 
 class FileValidator {
-  static const List<String> allowedExtensions = ['pdf', 'jpg', 'png', 'docx'];
+  static const List<String> allowedExtensions = [
+    'pdf',
+    'jpg',
+    'jpeg',
+    'png',
+    'gif',
+    'webp',
+    'bmp',
+    'doc',
+    'docx',
+    'xls',
+    'xlsx',
+    'csv',
+    'txt',
+    'rtf',
+    'ppt',
+    'pptx',
+    'zip',
+    'rar'
+  ];
 
   //Valida se a extensão é permitida
   static bool isValidFile(File file) {
@@ -15,17 +34,26 @@ class FileValidator {
     // Pega apenas no nome do ficheiro (ignora a pasta)
     String nomeFicheiro = caminhoCompleto.split(Platform.pathSeparator).last;
 
-    // Expressão Regular para encontrar uma letra seguida de números (ex: A1, B2, C10)
-    // O padrão r'([A-E][0-9]+)' procura: letras de A a E seguidas de 1 ou mais números
-    RegExp regExp = RegExp(r'([A-E][0-9]+)', caseSensitive: false);
+    // Expressão regular para encontrar códigos isolados como A1, B2, F10.
+    RegExp regExp = RegExp(r'(?:^|[^A-Z0-9])([A-Z][0-9]+)(?=[^A-Z0-9]|$)',
+        caseSensitive: false);
 
     Match? match = regExp.firstMatch(nomeFicheiro);
 
     if (match != null) {
-      return match.group(0)?.toUpperCase(); // Retorna "A1"
+      return match.group(1)?.toUpperCase(); // Retorna "A1"
     }
 
     return null; // Não encontrou nenhum código de requisito no nome do ficheiro
+  }
+
+  static bool textoContemCodigoRequisito(String texto, String codigo) {
+    final normalizado = texto.toUpperCase();
+    final codigoNorm = codigo.toUpperCase();
+    return RegExp(
+      '(?:^|[^A-Z0-9])${RegExp.escape(codigoNorm)}(?=[^A-Z0-9]|\$)',
+      caseSensitive: false,
+    ).hasMatch(normalizado);
   }
 
   static double getFileSizeInMB(File file) {

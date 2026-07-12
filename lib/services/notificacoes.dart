@@ -1,6 +1,8 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../database/bd_local_ajudante.dart';
 import '../models/notificacao_model.dart';
 import 'sincronizador.dart';
@@ -60,10 +62,24 @@ class Notificacoes {
       android: initializationSettingsAndroid,
     );
 
-    await _localNotifications.initialize(settings: initializationSettings);
+    await _localNotifications.initialize(
+      settings: initializationSettings,
+      onDidReceiveNotificationResponse: (_) => _abrirNotificacoesSeSessaoAtiva(),
+    );
 
     // Escuta em Background
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    FirebaseMessaging.onMessageOpenedApp.listen((_) {
+      _abrirNotificacoesSeSessaoAtiva();
+    });
+
+    final initialMessage = await _firebaseMessaging.getInitialMessage();
+    if (initialMessage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _abrirNotificacoesSeSessaoAtiva();
+      });
+    }
 
     // Escuta em Foreground (App aberta)
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
@@ -96,6 +112,7 @@ class Notificacoes {
               icon: android.smallIcon,
             ),
           ),
+          payload: 'notificacoes',
         );
 
         // Mostra o Popup Modal no meio do ecrã
@@ -106,6 +123,19 @@ class Notificacoes {
         await Sincronizador().sincronizarDadosIniciais();
       }
     });
+  }
+
+  Future<void> _abrirNotificacoesSeSessaoAtiva() async {
+    final context = _navKey?.currentContext;
+    if (context == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final isLogged = prefs.getBool('isLogged') ?? false;
+    final token = prefs.getString('jwtToken');
+    if (isLogged && token != null && token.isNotEmpty) {
+      context.go('/notificacoes');
+    } else {
+      context.go('/');
+    }
   }
 
   void _mostrarPopup(String titulo, String corpo) {
