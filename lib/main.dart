@@ -13,11 +13,11 @@ bool _isTokenExpired(String token) {
     final parts = token.split('.');
     if (parts.length != 3) return true;
     final payload = jsonDecode(
-      utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))
-    );
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
     final exp = payload['exp'];
     if (exp == null) return false;
-    return DateTime.fromMillisecondsSinceEpoch(exp * 1000).isBefore(DateTime.now());
+    return DateTime.fromMillisecondsSinceEpoch(exp * 1000)
+        .isBefore(DateTime.now());
   } catch (e) {
     return true; // Na dúvida, expirou
   }
@@ -44,6 +44,7 @@ void main() async {
       isLogged = false;
       await prefs.remove('jwtToken');
       await prefs.setBool('isLogged', false);
+      await prefs.setBool('sessaoExpirada', true);
     }
   } else {
     isLogged = false;
